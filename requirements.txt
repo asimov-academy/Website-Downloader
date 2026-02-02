@@ -1,0 +1,6 @@
+flask==3.0.0
+playwright==1.41.0
+requests==2.31.0
+beautifulsoup4==4.12.3
+urllib3==2.1.0
+gunicorn==21.2.0

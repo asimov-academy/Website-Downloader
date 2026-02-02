@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Website Downloader</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 2.5rem;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 520px;
+        }
+        h1 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: #1a1a2e;
+        }
+        .subtitle {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 1.5rem;
+        }
+        .input-group {
+            margin-bottom: 1rem;
+        }
+        input[type="url"] {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        input[type="url"]:focus {
+            border-color: #4a6cf7;
+            box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.1);
+        }
+        input[type="url"]:disabled {
+            background: #f5f5f5;
+            color: #999;
+        }
+        button {
+            background: linear-gradient(135deg, #4a6cf7 0%, #6366f1 100%);
+            color: white;
+            border: none;
+            padding: 14px 24px;
+            font-size: 1rem;
+            border-radius: 10px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(74, 108, 247, 0.4);
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .log-container {
+            margin-top: 1.5rem;
+            background: #1a1a2e;
+            border-radius: 10px;
+            padding: 1rem;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+        .log-container.active {
+            display: block;
+        }
+        .log-entry {
+            color: #a0a0a0;
+            font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+            font-size: 0.8rem;
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            animation: fadeIn 0.3s ease;
+        }
+        .log-entry:last-child {
+            border-bottom: none;
+            color: #4ade80;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .success-message {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 1rem;
+            border-radius: 10px;
+            margin-top: 1rem;
+            text-align: center;
+            display: none;
+            animation: slideUp 0.3s ease;
+        }
+        .success-message.active {
+            display: block;
+        }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .success-message a {
+            color: white;
+            font-weight: 600;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌐 Website Downloader</h1>
+        <p class="subtitle">Baixe uma réplica perfeita de qualquer site, incluindo JS renderizado</p>
+        
+        <div class="input-group">
+            <input type="url" id="urlInput" placeholder="https://exemplo.com" required>
+        </div>
+        
+        <button id="downloadBtn" onclick="startDownload()">
+            <span id="btnText">Baixar Réplica</span>
+            <div class="spinner" id="spinner" style="display: none;"></div>
+        </button>
+        
+        <div class="log-container" id="logContainer"></div>
+        
+        <div class="success-message" id="successMessage">
+            ✅ Download pronto! <a href="#" id="downloadLink">Clique aqui se não iniciou automaticamente</a>
+        </div>
+    </div>
+
+    <script>
+        let currentSessionId = null;
+        let eventSource = null;
+
+        function startDownload() {
+            const url = document.getElementById('urlInput').value.trim();
+            if (!url) {
+                alert('Por favor, insira uma URL válida');
+                return;
+            }
+
+            // Update UI
+            setLoading(true);
+            clearLogs();
+            hideSuccess();
+
+            // Start download
+            fetch('/start-download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: url })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    addLog('❌ ' + data.error);
+                    setLoading(false);
+                    return;
+                }
+                
+                currentSessionId = data.session_id;
+                connectSSE(currentSessionId);
+            })
+            .catch(error => {
+                addLog('❌ Erro de conexão: ' + error.message);
+                setLoading(false);
+            });
+        }
+
+        function connectSSE(sessionId) {
+            eventSource = new EventSource('/stream/' + sessionId);
+
+            eventSource.onmessage = function(event) {
+                addLog(event.data);
+            };
+
+            eventSource.addEventListener('done', function(event) {
+                eventSource.close();
+                
+                if (event.data === 'complete') {
+                    // Trigger download
+                    triggerDownload(sessionId);
+                    showSuccess(sessionId);
+                } else {
+                    addLog('❌ Download falhou');
+                }
+                
+                // Reset UI after a short delay
+                setTimeout(resetUI, 2000);
+            });
+
+            eventSource.onerror = function() {
+                eventSource.close();
+                setLoading(false);
+            };
+        }
+
+        function triggerDownload(sessionId) {
+            const link = document.createElement('a');
+            link.href = '/download-file/' + sessionId;
+            link.click();
+            
+            // Update manual download link
+            document.getElementById('downloadLink').href = '/download-file/' + sessionId;
+        }
+
+        function showSuccess(sessionId) {
+            document.getElementById('successMessage').classList.add('active');
+            document.getElementById('downloadLink').href = '/download-file/' + sessionId;
+        }
+
+        function hideSuccess() {
+            document.getElementById('successMessage').classList.remove('active');
+        }
+
+        function setLoading(loading) {
+            const btn = document.getElementById('downloadBtn');
+            const btnText = document.getElementById('btnText');
+            const spinner = document.getElementById('spinner');
+            const input = document.getElementById('urlInput');
+            const logContainer = document.getElementById('logContainer');
+
+            btn.disabled = loading;
+            input.disabled = loading;
+            spinner.style.display = loading ? 'block' : 'none';
+            btnText.textContent = loading ? 'Processando...' : 'Baixar Réplica';
+            
+            if (loading) {
+                logContainer.classList.add('active');
+            }
+        }
+
+        function resetUI() {
+            setLoading(false);
+            document.getElementById('urlInput').value = '';
+            
+            // Hide logs after delay
+            setTimeout(() => {
+                document.getElementById('logContainer').classList.remove('active');
+                hideSuccess();
+                clearLogs();
+            }, 5000);
+        }
+
+        function addLog(message) {
+            const container = document.getElementById('logContainer');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.textContent = message;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function clearLogs() {
+            document.getElementById('logContainer').innerHTML = '';
+        }
+
+        // Handle Enter key
+        document.getElementById('urlInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !document.getElementById('downloadBtn').disabled) {
+                startDownload();
+            }
+        });
+    </script>
+</body>
+</html>
