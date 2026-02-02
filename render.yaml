@@ -1,9 +1,8 @@
 services:
   - type: web
     name: website-downloader
-    env: python
-    buildCommand: pip install -r requirements.txt && playwright install --with-deps chromium
-    startCommand: gunicorn app:app
+    env: docker
+    dockerfilePath: ./Dockerfile
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
+      - key: PORT
+        value: 8080

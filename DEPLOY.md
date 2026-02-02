@@ -27,12 +27,13 @@ git push -u origin main
    - Selecione o repositório `website-downloader`
 
 3. **Configurações**:
-   ```
-   Name: website-downloader (ou qualquer nome)
-   Environment: Python 3
-   Build Command: pip install -r requirements.txt && playwright install --with-deps chromium
-   Start Command: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 300
-   ```
+   - O Render detectará automaticamente o `Dockerfile`
+   - Se não detectar, configure manualmente:
+     ```
+     Name: website-downloader (ou qualquer nome)
+     Environment: Docker
+     ```
+   - Não precisa configurar Build/Start Command (o Dockerfile já tem isso)
 
 4. **Plano**: 
    - Selecione o plano **Starter** ($7/mês)
