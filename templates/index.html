@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
         * {
             box-sizing: border-box;
         }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -18,6 +20,7 @@
             margin: 0;
             padding: 20px;
         }
+
         .container {
             background: rgba(255, 255, 255, 0.95);
             padding: 2.5rem;
@@ -26,21 +29,26 @@
             width: 100%;
             max-width: 520px;
         }
+
         h1 {
             margin: 0 0 0.5rem 0;
             font-size: 1.75rem;
             font-weight: 700;
             color: #1a1a2e;
         }
+
         .subtitle {
             color: #666;
             font-size: 0.9rem;
             margin-bottom: 1.5rem;
         }
+
         .input-group {
             margin-bottom: 1rem;
         }
-        input[type="url"], input[type="text"] {
+
+        input[type="url"],
+        input[type="text"] {
             width: 100%;
             padding: 14px 16px;
             border: 2px solid #e0e0e0;
@@ -49,11 +57,15 @@
             outline: none;
             transition: border-color 0.2s, box-shadow 0.2s;
         }
-        input[type="url"]:focus, input[type="text"]:focus {
+
+        input[type="url"]:focus,
+        input[type="text"]:focus {
             border-color: #4a6cf7;
             box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.1);
         }
-        input[type="url"]:disabled, input[type="text"]:disabled {
+
+        input[type="url"]:disabled,
+        input[type="text"]:disabled {
             background: #f5f5f5;
             color: #999;
         }
@@ -67,17 +79,20 @@
             cursor: pointer;
             user-select: none;
         }
+
         .auth-toggle input[type="checkbox"] {
             width: 18px;
             height: 18px;
             accent-color: #4a6cf7;
             cursor: pointer;
         }
+
         .auth-toggle label {
             font-size: 0.9rem;
             color: #444;
             cursor: pointer;
         }
+
         .auth-fields {
             display: none;
             margin-bottom: 1rem;
@@ -87,9 +102,11 @@
             border: 1px solid #e8eaff;
             animation: slideDown 0.3s ease;
         }
+
         .auth-fields.active {
             display: block;
         }
+
         .auth-fields label {
             display: block;
             font-size: 0.8rem;
@@ -97,14 +114,23 @@
             margin-bottom: 6px;
             font-weight: 500;
         }
+
         .auth-fields .hint {
             font-size: 0.75rem;
             color: #999;
             margin-top: 4px;
         }
+
         @keyframes slideDown {
-            from { opacity: 0; transform: translateY(-8px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(-8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         /* Confirm login button */
@@ -114,12 +140,21 @@
             display: none;
             animation: pulse 2s infinite;
         }
+
         .confirm-login-btn.active {
             display: flex !important;
         }
+
         @keyframes pulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
-            50% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+            }
+
+            50% {
+                box-shadow: 0 0 0 10px rgba(245, 158, 11, 0);
+            }
         }
 
         button {
@@ -138,27 +173,34 @@
             justify-content: center;
             gap: 10px;
         }
+
         button:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(74, 108, 247, 0.4);
         }
+
         button:disabled {
             background: #ccc;
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
         }
+
         .spinner {
             width: 18px;
             height: 18px;
-            border: 2px solid rgba(255,255,255,0.3);
+            border: 2px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%;
             border-top-color: white;
             animation: spin 0.8s linear infinite;
         }
+
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
+
         .log-container {
             margin-top: 1.5rem;
             background: #1a1a2e;
@@ -168,28 +210,41 @@
             overflow-y: auto;
             display: none;
         }
+
         .log-container.active {
             display: block;
         }
+
         .log-entry {
             color: #a0a0a0;
             font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
             font-size: 0.8rem;
             padding: 4px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
             animation: fadeIn 0.3s ease;
         }
+
         .log-entry:last-child {
             border-bottom: none;
             color: #4ade80;
         }
+
         .log-entry.auth-log {
             color: #fbbf24;
         }
+
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-5px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(-5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
+
         .success-message {
             background: linear-gradient(135deg, #10b981 0%, #059669 100%);
             color: white;
@@ -200,13 +255,23 @@
             display: none;
             animation: slideUp 0.3s ease;
         }
+
         .success-message.active {
             display: block;
         }
+
         @keyframes slideUp {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
+
         .success-message a {
             color: white;
             font-weight: 600;
@@ -214,11 +279,12 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <h1>🌐 Website Downloader</h1>
         <p class="subtitle">Baixe uma réplica perfeita de qualquer site, incluindo JS renderizado</p>
-        
+
         <div class="input-group">
             <input type="url" id="urlInput" placeholder="https://exemplo.com" required>
         </div>
@@ -233,7 +299,12 @@
             <input type="text" id="loginUrlInput" placeholder="https://exemplo.com/login">
             <p class="hint">Deixe vazio para usar a mesma URL acima. Use se a página de login for diferente.</p>
         </div>
-        
+
+        <div class="auth-toggle">
+            <input type="checkbox" id="extractRulesCheckbox">
+            <label for="extractRulesCheckbox">📋 Extrair regras de negócio</label>
+        </div>
+
         <button id="downloadBtn" onclick="startDownload()">
             <span id="btnText">Baixar Réplica</span>
             <div class="spinner" id="spinner" style="display: none;"></div>
@@ -242,9 +313,9 @@
         <button class="confirm-login-btn" id="confirmLoginBtn" onclick="confirmLogin()">
             <span>✅ Já fiz o login, pode continuar</span>
         </button>
-        
+
         <div class="log-container" id="logContainer"></div>
-        
+
         <div class="success-message" id="successMessage">
             ✅ Download pronto! <a href="#" id="downloadLink">Clique aqui se não iniciou automaticamente</a>
         </div>
@@ -270,6 +341,7 @@
 
             isAuthMode = document.getElementById('authCheckbox').checked;
             const loginUrl = document.getElementById('loginUrlInput').value.trim();
+            const extractRules = document.getElementById('extractRulesCheckbox').checked;
 
             // Update UI
             setLoading(true);
@@ -281,33 +353,34 @@
             fetch('/start-download', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
+                body: JSON.stringify({
                     url: url,
                     auth_mode: isAuthMode,
-                    login_url: loginUrl || null
+                    login_url: loginUrl || null,
+                    extract_rules: extractRules
                 })
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    addLog('❌ ' + data.error);
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        addLog('❌ ' + data.error);
+                        setLoading(false);
+                        return;
+                    }
+
+                    currentSessionId = data.session_id;
+                    connectSSE(currentSessionId);
+                })
+                .catch(error => {
+                    addLog('❌ Erro de conexão: ' + error.message);
                     setLoading(false);
-                    return;
-                }
-                
-                currentSessionId = data.session_id;
-                connectSSE(currentSessionId);
-            })
-            .catch(error => {
-                addLog('❌ Erro de conexão: ' + error.message);
-                setLoading(false);
-            });
+                });
         }
 
         function connectSSE(sessionId) {
             eventSource = new EventSource('/stream/' + sessionId);
 
-            eventSource.onmessage = function(event) {
+            eventSource.onmessage = function (event) {
                 const msg = event.data;
                 addLog(msg);
 
@@ -321,10 +394,10 @@
                 }
             };
 
-            eventSource.addEventListener('done', function(event) {
+            eventSource.addEventListener('done', function (event) {
                 eventSource.close();
                 hideConfirmLogin();
-                
+
                 if (event.data === 'complete') {
                     // Trigger download
                     triggerDownload(sessionId);
@@ -332,12 +405,12 @@
                 } else {
                     addLog('❌ Download falhou');
                 }
-                
+
                 // Reset UI after a short delay
                 setTimeout(resetUI, 2000);
             });
 
-            eventSource.onerror = function() {
+            eventSource.onerror = function () {
                 eventSource.close();
                 setLoading(false);
                 hideConfirmLogin();
@@ -350,15 +423,15 @@
             fetch('/confirm-login/' + currentSessionId, {
                 method: 'POST'
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    addLog('❌ ' + data.error);
-                }
-            })
-            .catch(error => {
-                addLog('❌ Erro ao confirmar login: ' + error.message);
-            });
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        addLog('❌ ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    addLog('❌ Erro ao confirmar login: ' + error.message);
+                });
         }
 
         function showConfirmLogin() {
@@ -373,7 +446,7 @@
             const link = document.createElement('a');
             link.href = '/download-file/' + sessionId;
             link.click();
-            
+
             // Update manual download link
             document.getElementById('downloadLink').href = '/download-file/' + sessionId;
         }
@@ -400,9 +473,10 @@
             input.disabled = loading;
             authCheckbox.disabled = loading;
             loginUrlInput.disabled = loading;
+            document.getElementById('extractRulesCheckbox').disabled = loading;
             spinner.style.display = loading ? 'block' : 'none';
             btnText.textContent = loading ? 'Processando...' : 'Baixar Réplica';
-            
+
             if (loading) {
                 logContainer.classList.add('active');
             }
@@ -412,7 +486,7 @@
             setLoading(false);
             document.getElementById('urlInput').value = '';
             hideConfirmLogin();
-            
+
             // Hide logs after delay
             setTimeout(() => {
                 document.getElementById('logContainer').classList.remove('active');
@@ -439,11 +513,12 @@
         }
 
         // Handle Enter key
-        document.getElementById('urlInput').addEventListener('keypress', function(e) {
+        document.getElementById('urlInput').addEventListener('keypress', function (e) {
             if (e.key === 'Enter' && !document.getElementById('downloadBtn').disabled) {
                 startDownload();
             }
         });
     </script>
 </body>
+
 </html>

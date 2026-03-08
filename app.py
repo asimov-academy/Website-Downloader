@@ -79,6 +79,7 @@ def start_download():
     url = data.get('url')
     auth_mode = data.get('auth_mode', False)
     login_url = data.get('login_url', '') or None
+    extract_rules = data.get('extract_rules', False)
     
     if not url:
         return jsonify({'error': 'URL is required'}), 400
@@ -93,13 +94,13 @@ def start_download():
         login_events[session_id] = threading.Event()
     
     # Start download in background thread
-    thread = threading.Thread(target=process_download, args=(session_id, url, auth_mode, login_url))
+    thread = threading.Thread(target=process_download, args=(session_id, url, auth_mode, login_url, extract_rules))
     thread.daemon = True
     thread.start()
     
     return jsonify({'session_id': session_id, 'auth_mode': auth_mode})
 
-def process_download(session_id, url, auth_mode=False, login_url=None):
+def process_download(session_id, url, auth_mode=False, login_url=None, extract_rules=False):
     """Background download process"""
     q = message_queues[session_id]
     request_id = session_id
@@ -119,7 +120,8 @@ def process_download(session_id, url, auth_mode=False, login_url=None):
             log_callback=log_callback,
             auth_mode=auth_mode,
             login_url=login_url,
-            login_confirmed_event=login_event
+            login_confirmed_event=login_event,
+            extract_rules=extract_rules
         )
         
         # Process the site

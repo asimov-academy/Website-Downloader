@@ -10,12 +10,13 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 import mimetypes
+from business_rules import BusinessRuleExtractor
 
 # Suppress SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class WebsiteDownloader:
-    def __init__(self, url, output_dir, log_callback=None, auth_mode=False, login_url=None, login_confirmed_event=None):
+    def __init__(self, url, output_dir, log_callback=None, auth_mode=False, login_url=None, login_confirmed_event=None, extract_rules=False):
         self.url = url
         self.output_dir = output_dir
         self.assets_dir = os.path.join(output_dir, 'assets')
@@ -30,6 +31,7 @@ class WebsiteDownloader:
         self.login_url = login_url or url
         self.login_confirmed_event = login_confirmed_event or threading.Event()
         self.auth_cookies = []  # Cookies captured from authenticated session
+        self.extract_rules = extract_rules  # Extract business rules after download
         
         if os.path.exists(output_dir):
             shutil.rmtree(output_dir)
@@ -866,6 +868,18 @@ class WebsiteDownloader:
             f.write(html_output)
         
         self.log(f"✅ Concluído! {len(self.resource_cache)} assets salvos")
+        
+        # Extract business rules if requested
+        if self.extract_rules:
+            self.log("📋 Extraindo regras de negócio...")
+            try:
+                extractor = BusinessRuleExtractor(html_output, self.base_url)
+                extractor.extract()
+                extractor.save(self.output_dir)
+                self.log("📋 Regras de negócio extraídas com sucesso!")
+            except Exception as e:
+                self.log(f"⚠️ Erro ao extrair regras de negócio: {str(e)[:100]}")
+        
         return True
 
     def _scroll_page(self, page):
