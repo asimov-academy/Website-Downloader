@@ -5,16 +5,18 @@ import shutil
 import hashlib
 import requests
 import urllib3
+import threading
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 import mimetypes
+from business_rules import BusinessRuleExtractor
 
 # Suppress SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class WebsiteDownloader:
-    def __init__(self, url, output_dir, log_callback=None):
+    def __init__(self, url, output_dir, log_callback=None, auth_mode=False, login_url=None, login_confirmed_event=None, extract_rules=False):
         self.url = url
         self.output_dir = output_dir
         self.assets_dir = os.path.join(output_dir, 'assets')
@@ -23,6 +25,13 @@ class WebsiteDownloader:
         self.base_url = url
         self.session = None  # Will be set with cookies from browser
         self.log_callback = log_callback or (lambda msg: print(msg))
+        
+        # Authentication support
+        self.auth_mode = auth_mode
+        self.login_url = login_url or url
+        self.login_confirmed_event = login_confirmed_event or threading.Event()
+        self.auth_cookies = []  # Cookies captured from authenticated session
+        self.extract_rules = extract_rules  # Extract business rules after download
         
         if os.path.exists(output_dir):
             shutil.rmtree(output_dir)
@@ -451,10 +460,65 @@ class WebsiteDownloader:
         
         return None, False
 
+    def _authenticate(self, playwright):
+        """Open a visible browser for the user to log in manually.
+        Returns captured cookies after user confirms login."""
+        self.log("🔐 Abrindo browser para login...")
+        self.log("🔐 Faça login no browser que abriu na sua tela.")
+        self.log("🔐 Depois de logado, clique em 'Já fiz o login' no app.")
+        
+        browser = playwright.chromium.launch(
+            headless=False,  # Visible browser for manual login
+            args=[
+                '--disable-dev-shm-usage',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+            ]
+        )
+        
+        context = browser.new_context(
+            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            viewport={'width': 1280, 'height': 800},
+            device_scale_factor=1,
+        )
+        
+        page = context.new_page()
+        
+        try:
+            page.goto(self.login_url, wait_until='load', timeout=60000)
+            self.log(f"🌐 Página de login carregada: {self.login_url}")
+        except Exception as e:
+            self.log(f"⚠️ Aviso ao carregar página de login: {str(e)[:100]}")
+        
+        # Wait for user to confirm login (max 5 minutes)
+        self.log("⏳ Aguardando confirmação de login...")
+        login_confirmed = self.login_confirmed_event.wait(timeout=300)
+        
+        if not login_confirmed:
+            self.log("❌ Timeout: login não foi confirmado em 5 minutos.")
+            browser.close()
+            return []
+        
+        self.log("✅ Login confirmado! Capturando cookies...")
+        
+        # Capture all cookies from the authenticated session
+        cookies = context.cookies()
+        self.log(f"🍪 {len(cookies)} cookies capturados da sessão autenticada")
+        
+        browser.close()
+        return cookies
+
     def process(self):
         with sync_playwright() as p:
-            self.log("🚀 Iniciando navegador...")
-            # Launch with reduced memory footprint
+            # Step 1: Authenticate if needed
+            if self.auth_mode:
+                self.auth_cookies = self._authenticate(p)
+                if not self.auth_cookies:
+                    self.log("❌ Falha na autenticação - abortando download.")
+                    return False
+            
+            self.log("🚀 Iniciando navegador de extração...")
+            # Launch headless browser for extraction
             browser = p.chromium.launch(
                 headless=True,
                 args=[
@@ -479,6 +543,11 @@ class WebsiteDownloader:
                 viewport={'width': 1920, 'height': 1080},
                 device_scale_factor=1,
             )
+            
+            # Inject auth cookies if we have them
+            if self.auth_cookies:
+                context.add_cookies(self.auth_cookies)
+                self.log("🍪 Cookies de autenticação injetados no browser de extração")
             
             page = context.new_page()
             
@@ -799,6 +868,18 @@ class WebsiteDownloader:
             f.write(html_output)
         
         self.log(f"✅ Concluído! {len(self.resource_cache)} assets salvos")
+        
+        # Extract business rules if requested
+        if self.extract_rules:
+            self.log("📋 Extraindo regras de negócio...")
+            try:
+                extractor = BusinessRuleExtractor(html_output, self.base_url)
+                extractor.extract()
+                extractor.save(self.output_dir)
+                self.log("📋 Regras de negócio extraídas com sucesso!")
+            except Exception as e:
+                self.log(f"⚠️ Erro ao extrair regras de negócio: {str(e)[:100]}")
+        
         return True
 
     def _scroll_page(self, page):
