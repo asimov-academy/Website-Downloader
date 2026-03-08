@@ -34,6 +34,7 @@ cleanup_downloads_folder()
 # Store for SSE messages per session
 message_queues = {}
 download_results = {}
+login_events = {}  # Store login confirmation events per session
 
 def cleanup_abandoned_sessions():
     """Clean up sessions that were never downloaded after 30 minutes"""
@@ -76,6 +77,8 @@ def start_download():
     """Start download process and return session ID for SSE"""
     data = request.get_json()
     url = data.get('url')
+    auth_mode = data.get('auth_mode', False)
+    login_url = data.get('login_url', '') or None
     
     if not url:
         return jsonify({'error': 'URL is required'}), 400
@@ -85,14 +88,18 @@ def start_download():
     message_queues[session_id] = queue.Queue()
     download_results[session_id] = {'status': 'processing', 'zip_path': None, 'filename': None}
     
+    # Create login event if auth mode is enabled
+    if auth_mode:
+        login_events[session_id] = threading.Event()
+    
     # Start download in background thread
-    thread = threading.Thread(target=process_download, args=(session_id, url))
+    thread = threading.Thread(target=process_download, args=(session_id, url, auth_mode, login_url))
     thread.daemon = True
     thread.start()
     
-    return jsonify({'session_id': session_id})
+    return jsonify({'session_id': session_id, 'auth_mode': auth_mode})
 
-def process_download(session_id, url):
+def process_download(session_id, url, auth_mode=False, login_url=None):
     """Background download process"""
     q = message_queues[session_id]
     request_id = session_id
@@ -103,8 +110,17 @@ def process_download(session_id, url):
         q.put(message)
     
     try:
-        # Initialize downloader with log callback
-        downloader = WebsiteDownloader(url, download_dir, log_callback=log_callback)
+        # Get login event if auth mode
+        login_event = login_events.get(session_id) if auth_mode else None
+        
+        # Initialize downloader with log callback and auth params
+        downloader = WebsiteDownloader(
+            url, download_dir, 
+            log_callback=log_callback,
+            auth_mode=auth_mode,
+            login_url=login_url,
+            login_confirmed_event=login_event
+        )
         
         # Process the site
         success = downloader.process()
@@ -144,6 +160,20 @@ def process_download(session_id, url):
                 os.remove(zip_path)
         except:
             pass
+    finally:
+        # Clean up login event
+        if session_id in login_events:
+            del login_events[session_id]
+
+@app.route('/confirm-login/<session_id>', methods=['POST'])
+def confirm_login(session_id):
+    """Endpoint called when user confirms they have logged in"""
+    event = login_events.get(session_id)
+    if not event:
+        return jsonify({'error': 'Session not found or not in auth mode'}), 404
+    
+    event.set()
+    return jsonify({'status': 'ok', 'message': 'Login confirmed'})
 
 @app.route('/stream/<session_id>')
 def stream(session_id):

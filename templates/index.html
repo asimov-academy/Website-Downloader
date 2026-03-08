@@ -40,7 +40,7 @@
         .input-group {
             margin-bottom: 1rem;
         }
-        input[type="url"] {
+        input[type="url"], input[type="text"] {
             width: 100%;
             padding: 14px 16px;
             border: 2px solid #e0e0e0;
@@ -49,14 +49,79 @@
             outline: none;
             transition: border-color 0.2s, box-shadow 0.2s;
         }
-        input[type="url"]:focus {
+        input[type="url"]:focus, input[type="text"]:focus {
             border-color: #4a6cf7;
             box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.1);
         }
-        input[type="url"]:disabled {
+        input[type="url"]:disabled, input[type="text"]:disabled {
             background: #f5f5f5;
             color: #999;
         }
+
+        /* Auth toggle */
+        .auth-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            user-select: none;
+        }
+        .auth-toggle input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #4a6cf7;
+            cursor: pointer;
+        }
+        .auth-toggle label {
+            font-size: 0.9rem;
+            color: #444;
+            cursor: pointer;
+        }
+        .auth-fields {
+            display: none;
+            margin-bottom: 1rem;
+            padding: 1rem;
+            background: #f8f9ff;
+            border-radius: 10px;
+            border: 1px solid #e8eaff;
+            animation: slideDown 0.3s ease;
+        }
+        .auth-fields.active {
+            display: block;
+        }
+        .auth-fields label {
+            display: block;
+            font-size: 0.8rem;
+            color: #666;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+        .auth-fields .hint {
+            font-size: 0.75rem;
+            color: #999;
+            margin-top: 4px;
+        }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Confirm login button */
+        .confirm-login-btn {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
+            margin-top: 0.75rem;
+            display: none;
+            animation: pulse 2s infinite;
+        }
+        .confirm-login-btn.active {
+            display: flex !important;
+        }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+            50% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+        }
+
         button {
             background: linear-gradient(135deg, #4a6cf7 0%, #6366f1 100%);
             color: white;
@@ -118,6 +183,9 @@
             border-bottom: none;
             color: #4ade80;
         }
+        .log-entry.auth-log {
+            color: #fbbf24;
+        }
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-5px); }
             to { opacity: 1; transform: translateY(0); }
@@ -154,10 +222,25 @@
         <div class="input-group">
             <input type="url" id="urlInput" placeholder="https://exemplo.com" required>
         </div>
+
+        <div class="auth-toggle">
+            <input type="checkbox" id="authCheckbox" onchange="toggleAuth()">
+            <label for="authCheckbox">🔐 Este site precisa de login</label>
+        </div>
+
+        <div class="auth-fields" id="authFields">
+            <label for="loginUrlInput">URL de Login (opcional)</label>
+            <input type="text" id="loginUrlInput" placeholder="https://exemplo.com/login">
+            <p class="hint">Deixe vazio para usar a mesma URL acima. Use se a página de login for diferente.</p>
+        </div>
         
         <button id="downloadBtn" onclick="startDownload()">
             <span id="btnText">Baixar Réplica</span>
             <div class="spinner" id="spinner" style="display: none;"></div>
+        </button>
+
+        <button class="confirm-login-btn" id="confirmLoginBtn" onclick="confirmLogin()">
+            <span>✅ Já fiz o login, pode continuar</span>
         </button>
         
         <div class="log-container" id="logContainer"></div>
@@ -170,6 +253,13 @@
     <script>
         let currentSessionId = null;
         let eventSource = null;
+        let isAuthMode = false;
+
+        function toggleAuth() {
+            const checked = document.getElementById('authCheckbox').checked;
+            const authFields = document.getElementById('authFields');
+            authFields.classList.toggle('active', checked);
+        }
 
         function startDownload() {
             const url = document.getElementById('urlInput').value.trim();
@@ -178,16 +268,24 @@
                 return;
             }
 
+            isAuthMode = document.getElementById('authCheckbox').checked;
+            const loginUrl = document.getElementById('loginUrlInput').value.trim();
+
             // Update UI
             setLoading(true);
             clearLogs();
             hideSuccess();
+            hideConfirmLogin();
 
             // Start download
             fetch('/start-download', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url })
+                body: JSON.stringify({ 
+                    url: url,
+                    auth_mode: isAuthMode,
+                    login_url: loginUrl || null
+                })
             })
             .then(response => response.json())
             .then(data => {
@@ -210,11 +308,22 @@
             eventSource = new EventSource('/stream/' + sessionId);
 
             eventSource.onmessage = function(event) {
-                addLog(event.data);
+                const msg = event.data;
+                addLog(msg);
+
+                // Show confirm button when waiting for login
+                if (msg.includes('Aguardando confirmação de login')) {
+                    showConfirmLogin();
+                }
+                // Hide confirm button after login confirmed
+                if (msg.includes('Login confirmado')) {
+                    hideConfirmLogin();
+                }
             };
 
             eventSource.addEventListener('done', function(event) {
                 eventSource.close();
+                hideConfirmLogin();
                 
                 if (event.data === 'complete') {
                     // Trigger download
@@ -231,7 +340,33 @@
             eventSource.onerror = function() {
                 eventSource.close();
                 setLoading(false);
+                hideConfirmLogin();
             };
+        }
+
+        function confirmLogin() {
+            if (!currentSessionId) return;
+
+            fetch('/confirm-login/' + currentSessionId, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    addLog('❌ ' + data.error);
+                }
+            })
+            .catch(error => {
+                addLog('❌ Erro ao confirmar login: ' + error.message);
+            });
+        }
+
+        function showConfirmLogin() {
+            document.getElementById('confirmLoginBtn').classList.add('active');
+        }
+
+        function hideConfirmLogin() {
+            document.getElementById('confirmLoginBtn').classList.remove('active');
         }
 
         function triggerDownload(sessionId) {
@@ -258,9 +393,13 @@
             const spinner = document.getElementById('spinner');
             const input = document.getElementById('urlInput');
             const logContainer = document.getElementById('logContainer');
+            const authCheckbox = document.getElementById('authCheckbox');
+            const loginUrlInput = document.getElementById('loginUrlInput');
 
             btn.disabled = loading;
             input.disabled = loading;
+            authCheckbox.disabled = loading;
+            loginUrlInput.disabled = loading;
             spinner.style.display = loading ? 'block' : 'none';
             btnText.textContent = loading ? 'Processando...' : 'Baixar Réplica';
             
@@ -272,6 +411,7 @@
         function resetUI() {
             setLoading(false);
             document.getElementById('urlInput').value = '';
+            hideConfirmLogin();
             
             // Hide logs after delay
             setTimeout(() => {
@@ -285,6 +425,10 @@
             const container = document.getElementById('logContainer');
             const entry = document.createElement('div');
             entry.className = 'log-entry';
+            // Highlight auth-related messages
+            if (message.includes('🔐') || message.includes('⏳') || message.includes('🍪')) {
+                entry.classList.add('auth-log');
+            }
             entry.textContent = message;
             container.appendChild(entry);
             container.scrollTop = container.scrollHeight;
