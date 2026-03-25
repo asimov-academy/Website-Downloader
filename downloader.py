@@ -14,7 +14,7 @@ import mimetypes
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class WebsiteDownloader:
-    def __init__(self, url, output_dir, log_callback=None):
+    def __init__(self, url, output_dir, log_callback=None, preserve_links=False):
         self.url = url
         self.output_dir = output_dir
         self.assets_dir = os.path.join(output_dir, 'assets')
@@ -23,6 +23,7 @@ class WebsiteDownloader:
         self.base_url = url
         self.session = None  # Will be set with cookies from browser
         self.log_callback = log_callback or (lambda msg: print(msg))
+        self.preserve_links = preserve_links  # When True, keep hrefs as absolute URLs for crawler rewriting
         
         if os.path.exists(output_dir):
             shutil.rmtree(output_dir)
@@ -704,17 +705,22 @@ class WebsiteDownloader:
                     elem['data-background'] = local_path
         
         # 9. Fix navigation links that won't work locally
-        # Convert "/" to "#" or "index.html" so they don't break when opened offline
         self.log("🔗 Corrigindo links de navegação...")
         for a in soup.find_all('a', href=True):
             href = a['href']
-            # Convert root links to stay on page
-            if href == '/':
-                a['href'] = '#'
-            # Convert other relative paths to anchors (they won't work offline anyway)
-            elif href.startswith('/') and not href.startswith('//'):
-                # Keep as anchor to prevent navigation errors
-                a['href'] = '#'
+            if href.startswith(('javascript:', 'mailto:', 'tel:', 'data:', '#', '')):
+                continue
+            if self.preserve_links:
+                # Convert to absolute URL so the crawler can rewrite them later
+                if not href.startswith(('http://', 'https://', '//')):
+                    a['href'] = urljoin(self.base_url, href)
+            else:
+                # Convert root links to stay on page
+                if href == '/':
+                    a['href'] = '#'
+                # Convert other relative paths to anchors (they won't work offline anyway)
+                elif href.startswith('/') and not href.startswith('//'):
+                    a['href'] = '#'
         
         # 10. Handle SPA frameworks (Gatsby, Next.js, Nuxt, etc.)
         # These frameworks use client-side routing that doesn't work offline
@@ -918,3 +924,192 @@ def zip_directory(folder_path, output_path):
     base_name = output_path.replace('.zip', '')
     shutil.make_archive(base_name, 'zip', folder_path)
     return base_name + '.zip'
+
+
+class SiteCrawler:
+    """Downloads multiple pages starting from a URL, following same-level links."""
+
+    def __init__(self, start_url, output_dir, log_callback=None):
+        self.start_url = start_url
+        self.output_dir = output_dir
+        self.log = log_callback or print
+        self.visited = set()
+        self.page_map = {}  # normalized_url -> absolute path to saved html file
+
+        parsed = urlparse(start_url)
+        self.origin = f"{parsed.scheme}://{parsed.netloc}"
+        # Scope = parent directory of the start URL path.
+        # e.g. "/explorer.htm" → scope "/"
+        #      "/courses/explorer.htm" → scope "/courses"
+        parts = parsed.path.rsplit('/', 1)
+        self.base_path = parts[0] if parts[0] else '/'
+
+    def _normalize(self, url):
+        """Strip fragment and trailing slash for consistent map keying."""
+        p = urlparse(url)
+        path = p.path.rstrip('/') or '/'
+        return f"{p.scheme}://{p.netloc}{path}"
+
+    def _abs(self, href, page_url):
+        """Resolve href to an absolute URL relative to page_url."""
+        return urljoin(page_url, href)
+
+    def _is_crawlable(self, url):
+        """Return True if the URL is within the crawl scope.
+
+        Scope: same origin + same directory level or any parent directory.
+        Subdirectories deeper than base_path are excluded.
+        """
+        p = urlparse(url)
+        if f"{p.scheme}://{p.netloc}" != self.origin:
+            return False
+        url_dir = p.path.rsplit('/', 1)[0] or '/'
+        if url_dir == self.base_path:
+            return True   # same level
+        if url_dir == '/':
+            return True   # root is always an ancestor
+        # url_dir is a parent of base_path when base_path starts with url_dir/
+        return self.base_path.startswith(url_dir + '/')
+
+    def _is_reachable(self, url):
+        """Return True if the URL responds with a 2xx HTTP status code."""
+        try:
+            resp = requests.head(
+                url, timeout=10, allow_redirects=True, verify=False,
+                headers={'User-Agent': 'Mozilla/5.0'}
+            )
+            if resp.status_code == 405:
+                # HEAD not allowed — fallback to GET with stream to avoid downloading body
+                resp = requests.get(
+                    url, timeout=10, allow_redirects=True, verify=False,
+                    headers={'User-Agent': 'Mozilla/5.0'}, stream=True
+                )
+                resp.close()
+            return resp.status_code < 400
+        except Exception:
+            return False
+
+    def _url_to_page_dir(self, url):
+        """Map a URL to a local output directory, mirroring URL path structure."""
+        p = urlparse(url)
+        path = p.path.strip('/')
+        if not path:
+            return self.output_dir
+        return os.path.join(self.output_dir, *path.split('/'))
+
+    def _extract_links(self, html_path, page_url):
+        """Return crawlable normalized URLs found in <a href> tags."""
+        links = []
+        try:
+            with open(html_path, encoding='utf-8') as f:
+                soup = BeautifulSoup(f.read(), 'html.parser')
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if not href or href.startswith(('javascript:', 'mailto:', 'tel:', '#', 'data:')):
+                    continue
+                # Resolve relative hrefs against the page URL
+                norm = self._normalize(self._abs(href, page_url))
+                if self._is_crawlable(norm) and norm not in self.visited:
+                    links.append(norm)
+        except Exception as e:
+            self.log(f"⚠️ Erro ao extrair links de {html_path}: {e}")
+        return list(dict.fromkeys(links))  # deduplicate preserving order
+
+    def _rewrite_links(self, html_path, page_url):
+        """Replace page URLs with relative local paths (or '#' if not downloaded)."""
+        try:
+            with open(html_path, encoding='utf-8') as f:
+                soup = BeautifulSoup(f.read(), 'html.parser')
+
+            changed = False
+            current_dir = os.path.dirname(html_path)
+
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if not href or href.startswith(('javascript:', 'mailto:', 'tel:', '#', 'data:')):
+                    continue
+                norm = self._normalize(self._abs(href, page_url))
+                if norm in self.page_map:
+                    rel = os.path.relpath(self.page_map[norm], current_dir)
+                    a['href'] = rel
+                    changed = True
+                elif self._is_crawlable(norm):
+                    # In-scope link that wasn't downloaded — neutralize it
+                    a['href'] = '#'
+                    changed = True
+
+            if changed:
+                with open(html_path, 'w', encoding='utf-8') as f:
+                    f.write(str(soup))
+        except Exception as e:
+            self.log(f"⚠️ Erro ao reescrever links em {html_path}: {e}")
+
+    def crawl(self):
+        to_visit = [self._normalize(self.start_url)]
+
+        while to_visit:
+            url = to_visit.pop(0)
+            if url in self.visited:
+                continue
+            self.visited.add(url)
+
+            # Skip unreachable URLs before attempting a full download
+            if not self._is_reachable(url):
+                self.log(f"   ⏭️ Ignorando (inacessível): {url}")
+                continue
+
+            self.log(f"\n📄 [{len(self.page_map) + 1}] Baixando: {url}")
+            page_dir = self._url_to_page_dir(url)
+            html_path = os.path.join(page_dir, 'index.html')
+
+            try:
+                downloader = WebsiteDownloader(url, page_dir, self.log, preserve_links=True)
+                downloader.process()
+                self.page_map[url] = html_path
+
+                new_links = self._extract_links(html_path, url)
+                to_visit.extend(l for l in new_links if l not in self.visited)
+                self.log(f"   🔍 {len(new_links)} novos links encontrados")
+            except Exception as e:
+                self.log(f"⚠️ Erro ao baixar {url}: {e}")
+
+        # Second pass: rewrite inter-page links to relative local paths
+        self.log(f"\n🔗 Reescrevendo links entre {len(self.page_map)} páginas...")
+        for url, html_path in self.page_map.items():
+            self._rewrite_links(html_path, url)
+
+        self.log(f"\n✅ Crawl concluído! {len(self.page_map)} páginas baixadas.")
+        return len(self.page_map) > 0
+
+
+if __name__ == '__main__':
+    import sys
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Download a website for offline viewing')
+    parser.add_argument('url', help='URL of the website to download')
+    parser.add_argument('-o', '--output', default=None, help='Output directory (default: site name derived from URL)')
+    parser.add_argument('-z', '--zip', action='store_true', help='Create a zip file of the downloaded site')
+    parser.add_argument('--crawl', action='store_true', help='Also download linked pages at the same URL level')
+    args = parser.parse_args()
+
+    output_dir = args.output or get_site_name(args.url)
+
+    if args.crawl:
+        print(f"Crawling {args.url} (same-level links) → ./{output_dir} ...")
+        crawler = SiteCrawler(args.url, output_dir)
+        success = crawler.crawl()
+    else:
+        print(f"Downloading {args.url} → ./{output_dir} ...")
+        downloader = WebsiteDownloader(args.url, output_dir)
+        success = downloader.process()
+
+    if success:
+        if args.zip:
+            zip_path = zip_directory(output_dir, output_dir + '.zip')
+            print(f"Zip created: {zip_path}")
+        else:
+            print(f"Done! Site saved to: {output_dir}/")
+    else:
+        print("Download failed.", file=sys.stderr)
+        sys.exit(1)

@@ -6,7 +6,7 @@ import queue
 import threading
 import time
 import glob
-from downloader import WebsiteDownloader, zip_directory, get_site_name
+from downloader import WebsiteDownloader, SiteCrawler, zip_directory, get_site_name
 
 app = Flask(__name__)
 
@@ -76,38 +76,40 @@ def start_download():
     """Start download process and return session ID for SSE"""
     data = request.get_json()
     url = data.get('url')
-    
+    crawl = bool(data.get('crawl', False))
+
     if not url:
         return jsonify({'error': 'URL is required'}), 400
-    
+
     # Create session
     session_id = str(uuid.uuid4())
     message_queues[session_id] = queue.Queue()
     download_results[session_id] = {'status': 'processing', 'zip_path': None, 'filename': None}
-    
+
     # Start download in background thread
-    thread = threading.Thread(target=process_download, args=(session_id, url))
+    thread = threading.Thread(target=process_download, args=(session_id, url, crawl))
     thread.daemon = True
     thread.start()
-    
+
     return jsonify({'session_id': session_id})
 
-def process_download(session_id, url):
+def process_download(session_id, url, crawl=False):
     """Background download process"""
     q = message_queues[session_id]
     request_id = session_id
     download_dir = os.path.join(DOWNLOAD_FOLDER, request_id)
     zip_path = os.path.join(DOWNLOAD_FOLDER, f"{request_id}.zip")
-    
+
     def log_callback(message):
         q.put(message)
-    
+
     try:
-        # Initialize downloader with log callback
-        downloader = WebsiteDownloader(url, download_dir, log_callback=log_callback)
-        
-        # Process the site
-        success = downloader.process()
+        if crawl:
+            crawler = SiteCrawler(url, download_dir, log_callback=log_callback)
+            success = crawler.crawl()
+        else:
+            downloader = WebsiteDownloader(url, download_dir, log_callback=log_callback)
+            success = downloader.process()
         
         if not success:
             q.put("❌ Falha no download")

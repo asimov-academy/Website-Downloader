@@ -144,6 +144,43 @@
             font-weight: 600;
             text-decoration: underline;
         }
+        .crawl-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 1rem;
+            padding: 12px 14px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            user-select: none;
+        }
+        .crawl-option:hover {
+            border-color: #4a6cf7;
+            background: rgba(74, 108, 247, 0.04);
+        }
+        .crawl-option input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #4a6cf7;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .crawl-option-text {
+            display: flex;
+            flex-direction: column;
+        }
+        .crawl-option-label {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #1a1a2e;
+        }
+        .crawl-option-desc {
+            font-size: 0.78rem;
+            color: #888;
+            margin-top: 1px;
+        }
     </style>
 </head>
 <body>
@@ -154,7 +191,15 @@
         <div class="input-group">
             <input type="url" id="urlInput" placeholder="https://exemplo.com" required>
         </div>
-        
+
+        <label class="crawl-option" id="crawlOption">
+            <input type="checkbox" id="crawlCheck">
+            <div class="crawl-option-text">
+                <span class="crawl-option-label">🔗 Baixar páginas vinculadas</span>
+                <span class="crawl-option-desc">Faz o crawl de todas as páginas no mesmo nível da URL informada</span>
+            </div>
+        </label>
+
         <button id="downloadBtn" onclick="startDownload()">
             <span id="btnText">Baixar Réplica</span>
             <div class="spinner" id="spinner" style="display: none;"></div>
@@ -178,6 +223,8 @@
                 return;
             }
 
+            const crawl = document.getElementById('crawlCheck').checked;
+
             // Update UI
             setLoading(true);
             clearLogs();
@@ -187,7 +234,7 @@
             fetch('/start-download', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url })
+                body: JSON.stringify({ url: url, crawl: crawl })
             })
             .then(response => response.json())
             .then(data => {
@@ -259,11 +306,17 @@
             const input = document.getElementById('urlInput');
             const logContainer = document.getElementById('logContainer');
 
+            const crawlCheck = document.getElementById('crawlCheck');
+            const crawlOption = document.getElementById('crawlOption');
+
             btn.disabled = loading;
             input.disabled = loading;
+            crawlCheck.disabled = loading;
+            crawlOption.style.opacity = loading ? '0.5' : '1';
+            crawlOption.style.pointerEvents = loading ? 'none' : '';
             spinner.style.display = loading ? 'block' : 'none';
             btnText.textContent = loading ? 'Processando...' : 'Baixar Réplica';
-            
+
             if (loading) {
                 logContainer.classList.add('active');
             }
