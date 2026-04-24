@@ -253,7 +253,9 @@ def stream(session_id):
         while True:
             try:
                 message = q.get(timeout=SSE_MESSAGE_TIMEOUT_S)
-                yield f"data: {message}\n\n"
+                # Sanitize: SSE fields must not contain bare newlines
+                safe = str(message).replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
+                yield f"data: {safe}\n\n"
 
                 result = download_results.get(session_id, {})
                 if result.get('status') in ['complete', 'error']:
@@ -263,7 +265,15 @@ def stream(session_id):
             except queue.Empty:
                 yield ": keepalive\n\n"
 
-    return Response(generate(), mimetype='text/event-stream')
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',  # disables Railway/nginx proxy buffering
+            'Connection': 'keep-alive',
+        },
+    )
 
 
 @app.route('/download-file/<session_id>')
