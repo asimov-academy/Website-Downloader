@@ -1,0 +1,19 @@
+# Compose do app web single-page.
+services:
+  deepmirrorwebsites:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.deepmirrorwebsites-${ENV_NAME}.rule=Host(`${SERVICE_HOST}`)
+      - traefik.http.routers.deepmirrorwebsites-${ENV_NAME}.entrypoints=websecure
+      - traefik.http.routers.deepmirrorwebsites-${ENV_NAME}.tls=true
+      - traefik.http.services.deepmirrorwebsites-${ENV_NAME}.loadbalancer.server.port=8080
+networks:
+  dokploy-network:
+    external: true

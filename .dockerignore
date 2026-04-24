@@ -29,6 +29,7 @@ wheels/
 venv/
 ENV/
 env/
+.cache/
 
 # IDEs
 .vscode/
@@ -43,10 +44,11 @@ Thumbs.db
 # Project specific
 downloads/*
 !downloads/.gitkeep
+.env
+.env.local
+.env.*
+!.env.example
 
 # Documentation
 *.md
 !README.md
-
-# UV lock file (not needed in container)
-uv.lock

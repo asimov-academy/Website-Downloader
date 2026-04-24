@@ -1,39 +1,31 @@
-# Use official Python base image
 FROM python:3.11-slim-bookworm
 
-# Install system dependencies for Playwright
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    && rm -rf /var/lib/apt/lists/*
+# Image oficial do app web single-page.
 
-# Set working directory
+COPY --from=ghcr.io/astral-sh/uv:0.9.21 /uv /uvx /bin/
+
+ENV PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright \
+    PORT=8080
+
 WORKDIR /app
 
-# Copy requirements
-COPY requirements.txt .
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-install-project
 
-# Install Playwright browsers and dependencies
-RUN playwright install --with-deps chromium
-
-# Copy application files
 COPY . .
+RUN uv sync --frozen
+RUN uv run playwright install --with-deps chromium
 
-# Create downloads directory
-RUN mkdir -p downloads
+RUN mkdir -p downloads && chmod +x /app/entrypoint.sh
 
-# Copy and set entrypoint script
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
-# Set default PORT environment variable
-ENV PORT=8080
-
-# Expose port (Railway/Render will set $PORT)
 EXPOSE 8080
 
-# Use shell form to ensure proper variable expansion
 CMD ["/bin/bash", "/app/entrypoint.sh"]

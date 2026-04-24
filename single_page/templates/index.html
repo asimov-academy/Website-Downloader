@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepMirror WebSites | Asimov Academy</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="background-glow"></div>
+
+    <div class="container">
+        <div class="panel-toolbar">
+            <form action="{{ url_for('logout') }}" method="post">
+                <button type="submit" class="logout-link">Sair</button>
+            </form>
+        </div>
+
+        <div class="header-content">
+            <div class="badge">AI DESIGNER</div>
+            <h1>DeepMirror <span>WebSites</span></h1>
+            <p class="subtitle">Capture experiências complexas (WebGL, Three.js, Rive) com fidelidade pixel-perfect para seus datasets de Design.</p>
+        </div>
+
+        <div class="input-wrapper">
+            <div class="input-group">
+                <input type="url" id="urlInput" placeholder="Cole a URL do site aqui..." required autocomplete="off">
+                <div class="input-focus-border"></div>
+            </div>
+        </div>
+
+        <div class="actions">
+            <button id="downloadBtn" onclick="startDownload()">
+                <span id="btnText">Iniciar Extração</span>
+                <div class="spinner" id="spinner" style="display: none;"></div>
+            </button>
+        </div>
+
+        <div class="log-container" id="logContainer">
+            <div class="log-header">
+                <span class="log-title">TERMINAL OUTPUT</span>
+                <button class="copy-logs-btn" id="copyLogsBtn" onclick="copyLogs()">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    Copiar
+                </button>
+            </div>
+            <div class="log-content" id="logContent">
+                </div>
+        </div>
+
+        <div class="success-message" id="successMessage">
+            <div class="success-icon">✅</div>
+            <div class="success-text">
+                <h3>Download Finalizado</h3>
+                <a href="#" id="downloadLink">Clique aqui para baixar o arquivo ZIP</a>
+            </div>
+        </div>
+
+        <div class="error-message" id="errorMessage">
+            <div class="error-icon">❌</div>
+            <div class="error-text">
+                <h3>Falha no Processo</h3>
+                <span id="errorText"></span>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

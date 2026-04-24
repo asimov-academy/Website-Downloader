@@ -1,12 +1,31 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "10-website-downloader"
+name = "deepmirror-websites"
 version = "0.1.0"
-description = "Add your description here"
+description = "Runtime network recording site downloader for offline high-fidelity captures"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
-    "beautifulsoup4>=4.14.3",
-    "flask>=3.1.2",
-    "playwright>=1.57.0",
-    "requests>=2.32.5",
+    "beautifulsoup4==4.12.3",
+    "cssbeautifier==1.15.1",
+    "flask==3.0.0",
+    "gunicorn==21.2.0",
+    "jsbeautifier==1.15.1",
+    "playwright==1.41.0",
+    "python-dotenv==1.0.1",
+    "rcssmin>=1.1.2",
+    "requests==2.31.0",
+    "rjsmin>=1.2.2",
+    "tiktoken>=0.12.0",
+    "urllib3==2.1.0",
 ]
+
+[tool.setuptools]
+packages = ["core", "core.clean", "core.extractors", "core.post_process", "single_page"]
+py-modules = ["downloader"]
+
+[tool.setuptools.package-data]
+core = ["fetch_interceptor.js"]

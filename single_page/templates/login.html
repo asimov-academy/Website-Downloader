@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login | DeepMirror WebSites</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="login-page">
+    <div class="login-vignette"></div>
+
+    <main class="login-shell">
+        <section class="login-card">
+            <div class="login-logo">ASIMOV</div>
+            <div class="login-header-row">
+                <span>Aplicação da Formação - AI Design</span>
+            </div>
+
+            {% if error %}
+            <div class="login-alert" role="alert">{{ error }}</div>
+            {% endif %}
+
+            <form method="post" class="login-form">
+                <input type="hidden" name="next" value="{{ request.args.get('next', '') }}">
+
+                <div class="login-field">
+                    <label for="username">E-mail ou nome de usuário</label>
+                    <div class="login-input-frame">
+                        <input
+                        type="text"
+                        name="username"
+                        id="username"
+                        placeholder="Digite seu login"
+                        autocomplete="username"
+                        required
+                    >
+                </div>
+            </div>
+
+                <div class="login-field">
+                    <label for="password">Senha</label>
+                    <div class="login-input-frame login-password-shell">
+                        <input
+                            type="password"
+                            name="password"
+                            id="password"
+                            placeholder="Digite sua senha"
+                            autocomplete="current-password"
+                            required
+                        >
+                        <span class="login-password-dot" aria-hidden="true"></span>
+                    </div>
+                </div>
+
+                <div class="login-help-row">
+                    <span>Acesso restrito ao sistema</span>
+                </div>
+
+                <button type="submit" class="login-submit">
+                    Entrar
+                </button>
+            </form>
+
+            <p class="login-legal">
+                <a href="https://hub.asimov.academy/politica-de-privacidade/" target="_blank" rel="noopener noreferrer">
+                    Políticas de Privacidade
+                </a>
+                <span>e</span>
+                <a href="https://hub.asimov.academy/termos-de-uso/" target="_blank" rel="noopener noreferrer">
+                    Termos de Uso
+                </a>
+            </p>
+        </section>
+    </main>
+
+    <script>
+        (() => {
+            const collapseSelection = (input) => {
+                if (!input || !input.value) {
+                    return;
+                }
+
+                try {
+                    const end = input.value.length;
+                    input.setSelectionRange(end, end);
+                } catch (_error) {
+                    // Ignore inputs that do not support selection ranges.
+                }
+            };
+
+            const normalizeRestoredFields = () => {
+                const fields = document.querySelectorAll('.login-form input');
+
+                fields.forEach((input) => {
+                    if (document.activeElement === input) {
+                        collapseSelection(input);
+                    }
+
+                    input.addEventListener('focus', () => collapseSelection(input));
+                });
+            };
+
+            window.addEventListener('pageshow', normalizeRestoredFields);
+            document.addEventListener('DOMContentLoaded', normalizeRestoredFields);
+        })();
+    </script>
+</body>
+</html>

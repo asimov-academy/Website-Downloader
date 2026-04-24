@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
+# Build script for Docker/Deploy environments
+# For local development, use setup.sh instead
+
 set -e
 
-echo "Installing Python dependencies..."
-pip install -r requirements.txt
+# Set Docker environment flag
+export DOCKER_CONTAINER=1
 
-echo "Installing Playwright Chromium..."
-playwright install chromium
-
-echo "Attempting to install system dependencies (may fail, that's ok)..."
-playwright install-deps chromium || echo "System deps install failed, continuing..."
-
-echo "Build completed successfully!"
+# Run unified setup
+./setup.sh
