@@ -4,6 +4,43 @@ Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 
 ## [Unreleased]
 
+### Fixed - Paths seguros para assets/ZIP e controle de concorrência no Playwright
+
+**Objetivo:** evitar falhas de filesystem por nomes/caminhos longos ou caracteres inválidos (`Errno 36`) e reduzir falhas temporárias de inicialização do browser em execuções concorrentes (`Errno 11`/`BlockingIOError`).
+
+- `core/path_safety.py`
+  - Adicionado módulo central para normalizar componentes de path em ASCII seguro
+  - Componentes e caminhos relativos agora são encurtados com hash estável quando passam dos limites configurados
+  - Nomes reservados do Windows, caracteres inválidos e extensões excessivamente longas são tratados antes de escrever arquivos no disco
+  - Nomes de arquivo ZIP passaram a usar a mesma política de sanitização por URL
+
+- `core/network.py`
+  - Geração de nomes de assets passou a sanitizar host, diretórios e arquivo final antes de salvar em `assets/`
+  - Caminhos preservados a partir da URL agora respeitam limite global de comprimento, mantendo hash estável para evitar colisões
+  - Fallback hash-based de arquivos com query string também passou a gerar nomes ASCII seguros e curtos
+
+- `downloader.py`
+  - `get_site_name()` passou a delegar para o helper seguro de URL, evitando nomes de ZIP longos, Unicode problemático ou caracteres inválidos
+
+- `core/browser.py`
+  - Inicialização do browser passou a usar semáforo global com limite configurável por `DM_MAX_CONCURRENT_BROWSERS` (`2` por padrão)
+  - `sync_playwright().start()` ganhou retry progressivo configurável para erros temporários de recurso (`DM_BROWSER_LAUNCH_RETRIES` e `DM_BROWSER_LAUNCH_RETRY_DELAY_S`)
+  - `close()` ficou idempotente e libera a vaga do semáforo mesmo quando o launch falha parcialmente
+
+- `core/__init__.py` e `.env.example`
+  - Adicionadas as configs:
+    - `DM_MAX_CONCURRENT_BROWSERS=2`
+    - `DM_BROWSER_LAUNCH_RETRIES=3`
+    - `DM_BROWSER_LAUNCH_RETRY_DELAY_S=2`
+
+**Validação técnica executada:**
+- `uv run python -m py_compile core/path_safety.py core/browser.py core/network.py downloader.py core/__init__.py`
+- Teste isolado dos helpers de path com segmentos longos, Unicode e extensões problemáticas
+- Teste isolado de `get_site_name()` para URL com acento/espaços no path
+- Teste isolado do semáforo do browser confirmando acquire/release com limite default `2`, sem abrir Chromium
+
+**Estado desta entrada:** correção implementada e validada sinteticamente. Confirmação final depende de teste manual do usuário em download real.
+
 ### Changed - Robustez da pipeline `clean/` para externalização, rewrite final e serve local
 
 **Objetivo:** corrigir resíduos no `clean/` que ainda deixavam JS/CSS inline, comentários artificiais, refs antigas após reorganização e comportamento inconsistente ao abrir o artefato offline pelo `serve.py`.

@@ -4,10 +4,9 @@ DeepMirror WebSites - Fachada que mantém interface pública
 Delegates to single_page.SinglePageService while preserving the
 public contract used by app.py and CLI callers.
 """
-import re
 import shutil
-from urllib.parse import urlparse
 
+from core.path_safety import site_name_from_url
 from single_page.service import SinglePageService
 
 
@@ -31,16 +30,7 @@ class WebsiteDownloader:
 
 def get_site_name(url):
     """Extract a clean site name from URL for the zip filename"""
-    parsed = urlparse(url)
-    # Get domain without www
-    domain = parsed.netloc.replace('www.', '')
-    # Clean special characters
-    clean_name = re.sub(r'[^a-zA-Z0-9.-]', '_', domain)
-    # Add path info if present (cleaned)
-    if parsed.path and parsed.path != '/':
-        path_part = re.sub(r'[^a-zA-Z0-9]', '_', parsed.path.strip('/'))[:30]
-        clean_name = f"{clean_name}_{path_part}"
-    return clean_name
+    return site_name_from_url(url)
 
 
 def zip_directory(folder_path, output_path):

@@ -2,6 +2,7 @@
 Browser Controller - Playwright operations
 """
 import html
+import threading
 import time
 from pathlib import Path
 
@@ -9,8 +10,14 @@ from playwright.sync_api import sync_playwright
 from . import (
     BROWSER_TIMEOUT, BROWSER_ARGS, USER_AGENT, BROWSER_HEADLESS,
     NETWORK_IDLE_TIMEOUT, NETWORK_IDLE_SILENCE, CSS_INJECTION_TIMEOUT,
-    MAX_SCROLL_ITERATIONS, INTERACTION_WAIT
+    MAX_SCROLL_ITERATIONS, INTERACTION_WAIT, MAX_CONCURRENT_BROWSERS,
+    BROWSER_LAUNCH_RETRIES, BROWSER_LAUNCH_RETRY_DELAY_S,
 )
+
+
+_BROWSER_SLOT_LIMIT = max(1, int(MAX_CONCURRENT_BROWSERS or 1))
+_BROWSER_SLOT = threading.BoundedSemaphore(_BROWSER_SLOT_LIMIT)
+
 
 class BrowserController:
     def play_all_videos(self, wait_time=8000):
@@ -43,11 +50,64 @@ class BrowserController:
         self.context = None
         self.page = None
         self.base_url = None
+        self._browser_slot_acquired = False
 
     def launch(self):
         """Launch browser and create page"""
         self.log("Iniciando navegador...")
-        self.playwright = sync_playwright().start()
+        self._acquire_browser_slot()
+        try:
+            return self._launch_page()
+        except Exception:
+            self.close()
+            raise
+
+    def _acquire_browser_slot(self):
+        if self._browser_slot_acquired:
+            return
+        if not _BROWSER_SLOT.acquire(blocking=False):
+            self.log(
+                f"Limite de navegadores ativo ({_BROWSER_SLOT_LIMIT}). "
+                "Aguardando vaga..."
+            )
+            _BROWSER_SLOT.acquire()
+            self.log("Vaga de navegador liberada. Continuando captura...")
+        self._browser_slot_acquired = True
+
+    def _release_browser_slot(self):
+        if not self._browser_slot_acquired:
+            return
+        try:
+            _BROWSER_SLOT.release()
+        except ValueError:
+            pass
+        self._browser_slot_acquired = False
+
+    def _is_temporary_resource_error(self, exc):
+        if isinstance(exc, BlockingIOError):
+            return True
+        if isinstance(exc, OSError) and getattr(exc, 'errno', None) == 11:
+            return True
+        message = str(exc)
+        return 'Resource temporarily unavailable' in message or 'Errno 11' in message
+
+    def _start_playwright(self):
+        attempts = max(1, int(BROWSER_LAUNCH_RETRIES or 1))
+        for attempt in range(1, attempts + 1):
+            try:
+                return sync_playwright().start()
+            except Exception as exc:
+                if attempt >= attempts or not self._is_temporary_resource_error(exc):
+                    raise
+                delay = max(0.1, float(BROWSER_LAUNCH_RETRY_DELAY_S or 1.0)) * attempt
+                self.log(
+                    "Playwright sem recurso temporário ao iniciar "
+                    f"(tentativa {attempt}/{attempts}). Retentando em {delay:.1f}s..."
+                )
+                time.sleep(delay)
+
+    def _launch_page(self):
+        self.playwright = self._start_playwright()
 
         executable_path = self.browser_options.get('executable_path')
         channel = self.browser_options.get('channel')
@@ -1016,10 +1076,17 @@ class BrowserController:
                 self.context.close()
             except Exception:
                 pass
+            self.context = None
         if self.browser:
             try:
                 self.browser.close()
             except Exception:
                 pass
+            self.browser = None
         if self.playwright:
-            self.playwright.stop()
+            try:
+                self.playwright.stop()
+            except Exception:
+                pass
+            self.playwright = None
+        self._release_browser_slot()

@@ -9,6 +9,7 @@ import urllib3
 import mimetypes
 from urllib.parse import urlparse, urljoin
 from . import RESOURCE_TIMEOUT, SKIP_DOMAINS, MAX_RETRIES, RETRY_BACKOFF
+from .path_safety import sanitize_path_component, sanitize_relative_path
 import time
 
 # Suppress SSL warnings
@@ -683,21 +684,43 @@ class NetworkRecorder:
                 # Cross-origin root-level files need a stable directory to preserve
                 # sibling relative imports without colliding with same-origin assets.
                 if len(parts) == 1 and not same_origin and parsed.netloc:
-                    host_part = re.sub(r'[^a-zA-Z0-9_@.-]', '_', parsed.netloc)[:100]
+                    host_part = sanitize_path_component(
+                        parsed.netloc,
+                        fallback='host',
+                        max_length=60,
+                        preserve_extension=False,
+                    )
                     if host_part:
                         clean_parts.append(host_part)
 
-                for part in parts:
-                    if part == parts[-1]:  # Last part (filename)
-                        clean_parts.append(part)
+                for index, part in enumerate(parts):
+                    if index == len(parts) - 1:  # Last part (filename)
+                        clean_parts.append(
+                            sanitize_path_component(
+                                part,
+                                fallback='resource',
+                                max_length=96,
+                                preserve_extension=True,
+                            )
+                        )
                     else:  # Folder names
                         # Preserve @ for npm packages (@rive-app, @react, etc)
-                        clean_part = re.sub(r'[^a-zA-Z0-9_@.-]', '_', part)[:50]
+                        clean_part = sanitize_path_component(
+                            part,
+                            fallback='dir',
+                            max_length=48,
+                            preserve_extension=False,
+                        )
                         if clean_part:
                             clean_parts.append(clean_part)
 
                 if clean_parts:
-                    structured_path = '/'.join(clean_parts)
+                    structured_path = sanitize_relative_path(
+                        clean_parts,
+                        fallback='asset',
+                        max_component=96,
+                        max_path=220,
+                    )
                     # Ensure JSON API endpoints get .json extension
                     if is_api_endpoint and not structured_path.endswith('.json'):
                         structured_path += '.json'
@@ -713,12 +736,20 @@ class NetworkRecorder:
         url_hash = hashlib.md5(url.encode()).hexdigest()[:12]
 
         name = os.path.basename(path.rstrip('/')) if path.rstrip('/') else 'resource'
-        if name:
-            name = re.sub(r'[^a-zA-Z0-9_-]', '_', name.split('.')[0])[:30]
-        else:
-            name = 'resource'
+        stem = os.path.splitext(name)[0] if name else 'resource'
+        safe_stem = sanitize_path_component(
+            stem,
+            fallback='resource',
+            max_length=40,
+            preserve_extension=False,
+        )
 
-        return f"{name}_{url_hash}{ext}"
+        return sanitize_path_component(
+            f"{safe_stem}_{url_hash}{ext}",
+            fallback=f"resource_{url_hash}",
+            max_length=96,
+            preserve_extension=True,
+        )
 
     def _save_resource(self, url, content, content_type='', overwrite=False):
         """Save a resource to disk and return relative path"""
