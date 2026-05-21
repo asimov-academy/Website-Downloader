@@ -31,6 +31,7 @@ from core import (
     LOGIN_USERNAME,
     SESSION_CLEANUP_INTERVAL_S,
     SESSION_MAX_AGE_S,
+    SSE_HEARTBEAT_INTERVAL_S,
     SSE_MESSAGE_TIMEOUT_S,
     STARTUP_CLEAN_DOWNLOADS,
 )
@@ -249,21 +250,22 @@ def stream(session_id):
             return
 
         q = message_queues[session_id]
+        heartbeat_interval = max(1, min(SSE_HEARTBEAT_INTERVAL_S, SSE_MESSAGE_TIMEOUT_S))
 
         while True:
             try:
-                message = q.get(timeout=SSE_MESSAGE_TIMEOUT_S)
+                message = q.get(timeout=heartbeat_interval)
                 # Sanitize: SSE fields must not contain bare newlines
                 safe = str(message).replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
                 yield f"data: {safe}\n\n"
-
-                result = download_results.get(session_id, {})
-                if result.get('status') in ['complete', 'error']:
-                    yield f"event: done\ndata: {result['status']}\n\n"
-                    break
-
             except queue.Empty:
                 yield ": keepalive\n\n"
+
+            result = download_results.get(session_id, {})
+            if result.get('status') in ['complete', 'error']:
+                yield f"event: done\ndata: {result['status']}\n\n"
+                break
+
 
     return Response(
         generate(),
@@ -274,6 +276,20 @@ def stream(session_id):
             'Connection': 'keep-alive',
         },
     )
+
+
+@app.route('/status/<session_id>')
+@login_required
+def status(session_id):
+    """Return current download status for resilient SSE reconnect handling."""
+    result = download_results.get(session_id)
+    if not result:
+        return jsonify({'status': 'not_found'}), 404
+
+    return jsonify({
+        'status': result.get('status', 'processing'),
+        'filename': result.get('filename'),
+    })
 
 
 @app.route('/download-file/<session_id>')

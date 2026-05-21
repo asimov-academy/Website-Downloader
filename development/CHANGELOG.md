@@ -4,6 +4,119 @@ Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 
 ## [Unreleased]
 
+### Fixed - Runtime cleanup conservador e aliases finais para sites complexos
+
+**Objetivo:** corrigir regressões visuais/runtime nos sites dos logs recentes sem voltar para parse estático, preservando runtimes sensíveis e usando o `resource-map.json` como fonte final de verdade para aliases offline.
+
+- `core/post_process/runtime_cleanup.py`
+  - Remoção de wrappers duplicados agora só roda quando o DOM capturado está claramente maior que o DOM original.
+  - Evita remover conteúdo legítimo em sites WordPress/Elementor como `riopetgavea.com.br`, onde a página ficava curta e o scroll parava antes do esperado.
+
+- `core/clean/manager.py`
+  - Modo conservador ampliado para runtimes Framer e WordPress/Elementor.
+  - Quando `resource-map.json` é reescrito durante a reorganização, o corretor de paths roda uma segunda vez com o mapa atualizado.
+
+- `core/clean/path_corrector.py`
+  - `resource-map.json` passou a funcionar como mapeamento independente, mesmo quando não há `path_mapping` novo.
+  - Adicionados aliases por basename/local path/signature para mídias Framer, chunks lazy-loaded e refs `assets/...`.
+  - Evita remapear refs de diretório base terminadas em `/`, preservando runtimes Vite/Three.js.
+
+- `core/templates/serve_template.py`
+  - `serve.py` local passou a resolver aliases por `resource-map`, sufixo, `/assets/` opcional, basename remoto original e variações de filename com `_`.
+  - Corrige chunks dinâmicos e módulos `.mjs` que o runtime pede com nome original, mas que foram salvos com nome local normalizado.
+
+- `core/network.py`
+  - Extração textual de assets em JS/JSON passou a incluir `.glb`/`.gltf`.
+  - Refs relativas em JS tentam primeiro resolução relativa ao arquivo e depois resolução pela raiz do site.
+  - Regex de asset tolera whitespace antes do fechamento da string.
+  - Relatório crítico considera também recursos salvos no `resource_cache`.
+
+- `core/clean/clean_html.py`
+  - Scripts `x-shader/*` ficam inline e não são externalizados como JS executável.
+  - Chamadas inline simples a globals opcionais são protegidas com `typeof`.
+  - SVG inline deixou de ser substituído por placeholder para não quebrar JS que mede paths/textos do SVG.
+
+- `core/clean/finalizer.py`
+  - Materialização de aliases deixou de varrer todos os textos para cada alias e passou a usar índice de referências.
+  - CSS local quebrado em `url()` é neutralizado para evitar refs inválidas no `clean/`.
+
+- `core/__init__.py`
+  - Lista default de tracking ganhou domínios comuns de A/B testing/ads/analytics (`intellimize`, Adobe DTM, 6sense, LinkedIn/Bing/Marketo) com cuidado para não classificar chunks legítimos por conteúdo.
+
+**Validação técnica executada:**
+- `uv run python -m py_compile` nos módulos alterados nesta rodada.
+- `clean_site(...)` reexecutado para:
+  - `downloads/riopetgavea.com.br`
+  - `downloads/ecoland.framer.website`
+  - `downloads/dash.dropbox.com_mclarenf1`
+  - `downloads/liquidink.design_github_web`
+  - `downloads/tabkitchenbakery.com`
+- Validação final de refs locais:
+  - `riopetgavea.com.br`: `1840` refs, `0` quebradas
+  - `ecoland.framer.website`: `919` refs, `0` quebradas
+  - `dash.dropbox.com_mclarenf1`: `140` refs, `0` quebradas
+  - `liquidink.design_github_web`: `19` refs, `0` quebradas
+  - `tabkitchenbakery.com`: `884` refs, `0` quebradas
+- `uv run python development/get_site_structure.py`
+- Smoke Playwright offline:
+  - `riopetgavea.com.br`: console/page/network OK; scroll funcional (`scrollHeight` medido `7289`, online no momento `7884`)
+  - `ecoland.framer.website`: console/page/network OK; `scrollHeight` `9797`
+  - `tabkitchenbakery.com`: console/page/network OK; `scrollHeight` `27086`
+  - `liquidink.design_github_web`: console/page/HTTP OK; fetch direto dos modelos `.glb` retorna `200`
+  - `dash.dropbox.com_mclarenf1`: sem console error, sem failed request e sem HTTP >= 400
+
+**Estado desta entrada:** feito e confirmado pelo usuário. Sites adicionados à lista de suportados em `development/SITES.md`.
+
+### Fixed - SSE resiliente e pós-processamento bounded para DOMs grandes
+
+**Objetivo:** reduzir quedas falsas da UI durante downloads longos e evitar que páginas médias/grandes fiquem minutos sem progresso no pós-processamento do HTML.
+
+- `single_page/app.py`
+  - SSE passou a enviar heartbeat em intervalo curto configurável por `DM_SSE_HEARTBEAT_INTERVAL_S`
+  - O stream agora checa estado terminal também após heartbeats, evitando corrida em que `Download pronto!` era enviado antes de `download_results` virar `complete`
+  - Adicionado endpoint `/status/<session_id>` para o frontend distinguir erro transitório de SSE de job realmente finalizado/falho
+
+- `single_page/static/js/main.js`
+  - `EventSource.onerror` deixou de encerrar o job imediatamente
+  - A UI consulta `/status/<session_id>` e mantém a reconexão automática enquanto o backend ainda está processando
+  - Proteção contra duplo disparo do download quando o stream reconecta perto do evento terminal
+
+- `core/post_process/core.py` e `core/post_process/transformers.py`
+  - Restaurações baseadas em comparação entre HTML original e DOM capturado agora são puladas em DOMs grandes
+  - Evita custo quadrático de matching em páginas WordPress/Elementor e similares, mantendo o pipeline avançando
+  - O skip é registrado no log com contagem de elementos para auditoria
+
+- `core/clean/finalizer.py` e `core/clean/manager.py`
+  - URLs locais de imagens em CSS que apontam para arquivos inexistentes são neutralizadas no final do rebundle
+  - Corrige casos de sprites/backgrounds opcionais que já retornavam 404 na origem e deixavam o `clean/` com validação quebrada
+
+- `.env.example` e `core/__init__.py`
+  - Adicionada `DM_SSE_HEARTBEAT_INTERVAL_S=10`
+
+**Validação técnica executada:**
+- Rebuild de ambiente via `bash setup.sh` após limpar `.venv`, `__pycache__` e `.pyc`
+- `uv run python -m py_compile core/__init__.py single_page/app.py core/post_process/core.py core/post_process/transformers.py core/clean/finalizer.py core/clean/manager.py`
+- `node --check single_page/static/js/main.js`
+- Teste HTTP autenticado do SSE no app com `https://example.org/`
+  - Heartbeats recebidos durante esperas longas
+  - Evento terminal `done/complete` recebido corretamente
+- Fluxo completo reexecutado em `https://riopetgavea.com.br/`
+  - O pós-processamento avançou após o ponto que travava nos logs
+  - Log registrado: `Pulando restaurações baseadas no HTML original em DOM grande (540/1323 elementos)`
+  - Download finalizou em `downloads/riopetgavea.com.br`
+- `clean_site('downloads/riopetgavea.com.br')` reexecutado a partir de `raw/`
+  - `Finalizer: 11 url(s) CSS locais quebradas neutralizadas`
+  - Validação final: `OK`, `2240` refs verificadas, `0` quebradas
+- `uv run python development/get_site_structure.py`
+- Smoke offline com Playwright headless em `downloads/riopetgavea.com.br/clean/serve.py`
+  - título: `Home - Riopet Gávea`
+  - console errors: `0`
+  - page errors: `0`
+  - request failed: `0`
+  - HTTP >= 400: `0`
+
+**Estado desta entrada:** correção implementada e validada tecnicamente em `riopetgavea.com.br`. Confirmação final depende de teste manual do usuário; não marcado como resolvido.
+
 ### Fixed - Paths seguros para assets/ZIP e controle de concorrência no Playwright
 
 **Objetivo:** evitar falhas de filesystem por nomes/caminhos longos ou caracteres inválidos (`Errno 36`) e reduzir falhas temporárias de inicialização do browser em execuções concorrentes (`Errno 11`/`BlockingIOError`).

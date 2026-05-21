@@ -52,17 +52,25 @@ class PostProcessor(
 
         self._cleanup_runtime_dom_state(soup)
         self._remove_runtime_duplicate_wrappers(soup)
-        if is_ssr_framework:
-            if self._should_prune_runtime_nodes(soup):
-                self._prune_runtime_only_nodes(soup)
-            self._restore_empty_runtime_hosts(soup)
-        self._restore_missing_original_support_nodes(soup)
-        self._restore_hollow_content_containers(soup)
+        original_soup = self._get_original_html_soup()
+        run_original_dom_restorers = not self._dom_pair_too_large_for_original_matching(
+            soup,
+            original_soup,
+            'restaurações baseadas no HTML original',
+            max_elements=1000,
+        )
+        if run_original_dom_restorers:
+            if is_ssr_framework:
+                if self._should_prune_runtime_nodes(soup):
+                    self._prune_runtime_only_nodes(soup)
+                self._restore_empty_runtime_hosts(soup)
+            self._restore_missing_original_support_nodes(soup)
+            self._restore_hollow_content_containers(soup)
+            self._restore_original_form_controls(soup)
+            self._restore_original_inline_styles(soup)
+            self._restore_original_svg_transforms(soup)
+            self._restore_original_style_tags(soup)
         self._remove_duplicate_enhanced_fallback_blocks(soup)
-        self._restore_original_form_controls(soup)
-        self._restore_original_inline_styles(soup)
-        self._restore_original_svg_transforms(soup)
-        self._restore_original_style_tags(soup)
         self._remove_canvas_snapshots(soup)
         self._fix_scroll_blocking(soup)
         self._remove_wrapper_iframes(soup)

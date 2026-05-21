@@ -51,22 +51,22 @@ class NetworkRecorder:
             'css', 'js', 'mjs', 'png', 'jpe?g', 'svg', 'webp', 'avif', 'gif',
             'woff2?', 'ttf', 'otf', 'eot', 'json', 'webmanifest', 'wasm',
             'ico', 'xml', 'txt', 'mp4', 'webm', 'mov', 'bin', 'ktx2',
-            'mp3', 'ogg', 'm4a', 'aac', 'wav', 'flac', 'opus',
+            'glb', 'gltf', 'mp3', 'ogg', 'm4a', 'aac', 'wav', 'flac', 'opus',
         )
         text_ext_pattern = '|'.join(text_extensions)
         # Inline extension list used in patterns that don't use text_ext_pattern
-        _inline_media_exts = r'png|jpe?g|svg|webp|avif|gif|woff2?|ttf|otf|eot|json|webmanifest|wasm|ico|xml|txt|mp4|webm|mov|bin|ktx2|mp3|ogg|m4a|aac|wav|flac|opus'
+        _inline_media_exts = r'png|jpe?g|svg|webp|avif|gif|woff2?|ttf|otf|eot|json|webmanifest|wasm|ico|xml|txt|mp4|webm|mov|bin|ktx2|glb|gltf|mp3|ogg|m4a|aac|wav|flac|opus'
 
         asset_patterns = [
-            rf'["\']((?:https?:)?//[^"\']+\.(?:{text_ext_pattern})(?:\?[^"\']*)?)["\']',
-            rf'["\']((?:\./|\.\./)[A-Za-z0-9@_%./ -]+\.(?:{text_ext_pattern})(?:\?[^"\']*)?)["\']',
-            rf'["\']((?:\./|\.\./|/)?(?:_next/static/(?:css|chunks)|assets|static)/(?:[A-Za-z0-9@_./ -]+)\.(?:{text_ext_pattern})(?:\?[^"\']*)?)["\']',
-            rf'["\']((?:\./|\.\./)?[A-Za-z0-9][A-Za-z0-9_. -]*-[A-Za-z0-9_. -]+\.(?:{text_ext_pattern})(?:\?[^"\']*)?)["\']',
-            rf'["\']((?:/[A-Za-z0-9@_./ -]+)\.(?:{text_ext_pattern})(?:\?[^"\']*)?)["\']',
-            rf'["\']([A-Za-z0-9][A-Za-z0-9_. -]*\.(?:{_inline_media_exts})(?:\?[^"\']*)?)["\']',
-            rf'`((?:\./|\.\./)[A-Za-z0-9@_%./ -]+\.(?:{text_ext_pattern})(?:\?[^`]*)?)`',
-            rf'`((?:/[A-Za-z0-9@_./ -]+)\.(?:{text_ext_pattern})(?:\?[^`]*)?)`',
-            rf'`([A-Za-z0-9][A-Za-z0-9_. -]*\.(?:{_inline_media_exts})(?:\?[^`]*)?)`',
+            rf'["\']((?:https?:)?//[^"\']+\.(?:{text_ext_pattern})(?:\?[^"\']*)?)\s*["\']',
+            rf'["\']((?:\./|\.\./)[A-Za-z0-9@_%./ -]+\.(?:{text_ext_pattern})(?:\?[^"\']*)?)\s*["\']',
+            rf'["\']((?:\./|\.\./|/)?(?:_next/static/(?:css|chunks)|assets|static)/(?:[A-Za-z0-9@_./ -]+)\.(?:{text_ext_pattern})(?:\?[^"\']*)?)\s*["\']',
+            rf'["\']((?:\./|\.\./)?[A-Za-z0-9][A-Za-z0-9_. -]*-[A-Za-z0-9_. -]+\.(?:{text_ext_pattern})(?:\?[^"\']*)?)\s*["\']',
+            rf'["\']((?:/[A-Za-z0-9@_./ -]+)\.(?:{text_ext_pattern})(?:\?[^"\']*)?)\s*["\']',
+            rf'["\']([A-Za-z0-9][A-Za-z0-9_. -]*\.(?:{_inline_media_exts})(?:\?[^"\']*)?)\s*["\']',
+            rf'`((?:\./|\.\./)[A-Za-z0-9@_%./ -]+\.(?:{text_ext_pattern})(?:\?[^`]*)?)\s*`',
+            rf'`((?:/[A-Za-z0-9@_./ -]+)\.(?:{text_ext_pattern})(?:\?[^`]*)?)\s*`',
+            rf'`([A-Za-z0-9][A-Za-z0-9_. -]*\.(?:{_inline_media_exts})(?:\?[^`]*)?)\s*`',
         ]
 
         # Scan JS files recursively because newly-downloaded chunks can reveal
@@ -114,6 +114,17 @@ class NetworkRecorder:
                             local_asset = self._download_fallback(asset_url)
                             if local_asset:
                                 assets_downloaded += 1
+
+                        if not local_asset and asset_ref.startswith(('./', '../')):
+                            root_asset_url = urljoin(self.base_url, asset_ref.lstrip('./'))
+                            if root_asset_url != asset_url:
+                                local_asset = self.resource_cache.get(root_asset_url)
+                                if not local_asset:
+                                    local_asset = self._download_fallback(root_asset_url)
+                                    if local_asset:
+                                        assets_downloaded += 1
+                                if local_asset:
+                                    self.resource_cache[asset_url] = local_asset
 
                         if local_asset and local_asset.endswith(('.js', '.mjs', '.json', '.webmanifest')):
                             text_queue.append((asset_url, local_asset))
@@ -1184,6 +1195,25 @@ class NetworkRecorder:
         """Return the resource_map for URL rewriting"""
         return self.resource_cache.copy()
 
+    def _has_captured_or_saved_resource(self, url):
+        """Return True when a seen URL exists in either capture memory or disk map."""
+        if not url:
+            return False
+
+        candidates = [url]
+        parsed = urlparse(url)
+        if parsed.fragment:
+            candidates.append(parsed._replace(fragment='').geturl())
+        if parsed.query:
+            candidates.append(parsed._replace(query='').geturl())
+        if parsed.query and parsed.fragment:
+            candidates.append(parsed._replace(query='', fragment='').geturl())
+
+        return any(
+            candidate in self.network_resources or candidate in self.resource_cache
+            for candidate in candidates
+        )
+
     def get_stats(self):
         """Return statistics"""
         return {
@@ -1230,7 +1260,7 @@ class NetworkRecorder:
         critical_seen = []
         for url, status in self.all_seen_urls:
             if any(pattern in url.lower() for pattern in critical_patterns):
-                if url not in self.network_resources:
+                if not self._has_captured_or_saved_resource(url):
                     critical_seen.append((url, status))
 
         if critical_seen:

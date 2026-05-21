@@ -21,6 +21,23 @@ def _to_local_browser_path(local_path):
 
 def rewrite_css_urls(css_content, css_url, network_recorder):
     """Rewrite all url() references in a CSS string using the network resource map."""
+    resource_cache = getattr(network_recorder, 'resource_cache', {}) or {}
+
+    def lookup_cached(abs_url):
+        parsed_abs = urlparse(abs_url)
+        candidates = [abs_url]
+        if parsed_abs.fragment:
+            candidates.append(parsed_abs._replace(fragment='').geturl())
+        if abs_url.startswith('https://'):
+            candidates.append(abs_url.replace('https://', 'http://', 1))
+        elif abs_url.startswith('http://'):
+            candidates.append(abs_url.replace('http://', 'https://', 1))
+
+        for candidate in candidates:
+            local_path = resource_cache.get(candidate)
+            if local_path:
+                return local_path
+        return None
 
     def replacer(match):
         full_match = match.group(0)
@@ -34,13 +51,7 @@ def rewrite_css_urls(css_content, css_url, network_recorder):
 
         abs_url = urljoin(css_url, url_content)
         parsed_abs = urlparse(abs_url)
-        local_path = network_recorder.get_resource(abs_url)
-        if (
-            (not local_path or local_path == abs_url)
-            and parsed_abs.fragment
-        ):
-            without_fragment = parsed_abs._replace(fragment='').geturl()
-            local_path = network_recorder.get_resource(without_fragment)
+        local_path = lookup_cached(abs_url)
 
         if local_path and local_path.startswith('assets/'):
             browser_path = _to_local_browser_path(local_path)

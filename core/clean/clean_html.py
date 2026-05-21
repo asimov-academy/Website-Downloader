@@ -76,6 +76,8 @@ _NON_JS_SCRIPT_TYPES = {
     'text/x-tmpl',
     'text/html',
     'text/x-template',
+    'x-shader/x-fragment',
+    'x-shader/x-vertex',
 }
 _DISPLAY_NONE_PATTERN = re.compile(r'display\s*:\s*none', re.IGNORECASE)
 _BLANK_LINES_PATTERN = re.compile(r'\n\s*\n\s*\n+')
@@ -110,6 +112,25 @@ def _is_preserved_inline_script(script_tag, inline_text=''):
         return True
 
     return False
+
+
+def _is_non_js_script_type(script_type):
+    script_type = (script_type or '').lower().strip()
+    if not script_type:
+        return False
+    if script_type in _NON_JS_SCRIPT_TYPES:
+        return True
+    return script_type.startswith(('x-shader/', 'text/x-shader/'))
+
+
+def _guard_inline_global_call(js_content):
+    stripped = (js_content or '').strip()
+    match = re.fullmatch(r'([A-Za-z_$][\w$]*)\s*\((.*?)\)\s*;?', stripped, re.DOTALL)
+    if not match:
+        return js_content
+    name = match.group(1)
+    args = match.group(2).strip()
+    return f'if (typeof {name} === "function") {{ {name}({args}); }}'
 
 
 def clean_html_content(content):
@@ -167,7 +188,10 @@ def clean_html_content_with_stats(content, filepath=None):
     tracking_attrs_removed = _remove_tracking_data_attrs(soup)
     _remove_empty_data_attrs(soup)
     hidden_elements_removed = _remove_hidden_elements(soup)
-    svgs_replaced = _replace_complex_svgs(soup, filepath=filepath)
+    # Inline SVGs are often live UI state: masks, paths measured by JS, logos,
+    # icons and WebGL/canvas controls. Replacing them improves readability but
+    # breaks runtime fidelity, so keep them intact.
+    svgs_replaced = 0
     _strip_comments(soup)
     sections_detected = _insert_section_markers(soup)
     _strip_block_intertag_whitespace(soup)
@@ -236,7 +260,7 @@ def _extract_inline_assets(soup, html_path):
 
         # Tipos não-JavaScript ficam inline (JSON-LD, templates, etc.)
         script_type = (_safe_get(script_tag, 'type', '') or '').lower().strip()
-        if script_type in _NON_JS_SCRIPT_TYPES:
+        if _is_non_js_script_type(script_type):
             continue
 
         js_content = script_tag.string or ''
@@ -256,6 +280,7 @@ def _extract_inline_assets(soup, html_path):
         if not is_generated_runtime_script and looks_like_tracking_script(js_content):
             continue
 
+        js_content = _guard_inline_global_call(js_content)
         count = extracted['scripts'] + 1
         filename = f'{stem}_script_{count}.js'
         js_path = parent / filename
@@ -282,7 +307,7 @@ def _remove_tracking_scripts(soup):
 
     for script in list(soup.find_all('script')):
         script_type = (_safe_get(script, 'type', '') or '').lower().strip()
-        if script_type in _NON_JS_SCRIPT_TYPES:
+        if _is_non_js_script_type(script_type):
             continue
         if _safe_get(script, 'data-generated-importmap', '') == 'true':
             continue

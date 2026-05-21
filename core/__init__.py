@@ -85,6 +85,7 @@ STARTUP_CLEAN_DOWNLOADS = _get_bool('DM_STARTUP_CLEAN_DOWNLOADS', True)
 SESSION_CLEANUP_INTERVAL_S = _get_int('DM_SESSION_CLEANUP_INTERVAL_S', 300)
 SESSION_MAX_AGE_S = _get_int('DM_SESSION_MAX_AGE_S', 1800)
 SSE_MESSAGE_TIMEOUT_S = _get_int('DM_SSE_MESSAGE_TIMEOUT_S', 60)
+SSE_HEARTBEAT_INTERVAL_S = _get_int('DM_SSE_HEARTBEAT_INTERVAL_S', 10)
 DOWNLOAD_CLEANUP_DELAY_S = _get_float('DM_DOWNLOAD_CLEANUP_DELAY_S', 1.0)
 
 BROWSER_TIMEOUT = _get_int('DM_BROWSER_TIMEOUT_MS', 60000)
@@ -133,6 +134,13 @@ DEFAULT_SKIP_DOMAINS = (
     'livechatinc.com',
     'freshchat.com',
     'outseta.com',
+    'intellimize.co',
+    'intellimizeditor.com',
+    'adobedtm.com',
+    '6sc.co',
+    'snap.licdn.com',
+    'bat.bing.com',
+    'munchkin.marketo.net',
 )
 SKIP_DOMAINS = _get_csv('DM_SKIP_DOMAINS', DEFAULT_SKIP_DOMAINS)
 
@@ -164,6 +172,10 @@ DEFAULT_TRACKING_SCRIPTS = (
     'monorail',
     'web-pixels',
     'webpixels',
+    'adobedtm',
+    '6si',
+    'linkedin',
+    'munchkin',
 )
 TRACKING_SCRIPTS = _get_csv('DM_TRACKING_SCRIPTS', DEFAULT_TRACKING_SCRIPTS)
 _AMBIGUOUS_TRACKING_MARKERS = {'pixel', 'segment', 'gtag'}

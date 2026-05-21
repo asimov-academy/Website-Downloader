@@ -121,10 +121,17 @@ class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         normalized = request_path if request_path.startswith('/') else f'/{request_path}'
         parsed_request = urlparse(normalized)
+        request_paths = [parsed_request.path]
+        if parsed_request.path.startswith('/assets/'):
+            request_paths.append('/' + parsed_request.path[len('/assets/'):].lstrip('/'))
+        request_paths = list(dict.fromkeys(path for path in request_paths if path))
+
         request_key = parsed_request.path
         if parsed_request.query:
             request_key = f'{request_key}?{parsed_request.query}'
 
+        basename_matches = []
+        request_basename = Path(parsed_request.path).name
         for original_url, local_path in resource_map.items():
             parsed_original = urlparse(original_url)
             original_key = parsed_original.path or '/'
@@ -134,7 +141,12 @@ class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if original_key == request_key:
                 return _to_browser_path(local_path)
 
-            same_path = parsed_original.path == parsed_request.path
+            same_path = parsed_original.path in request_paths
+            suffix_alias = any(
+                parsed_original.path.endswith(path)
+                for path in request_paths
+                if path not in {'', '/'} and Path(path).suffix
+            )
             same_plain_path = same_path and not parsed_original.query and not parsed_request.query
             same_rsc_route = same_path and ('_rsc=' in parsed_original.query) and ('_rsc=' in parsed_request.query)
             same_next_image_route = (
@@ -143,9 +155,26 @@ class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 and 'url=' in parsed_original.query
                 and 'url=' in parsed_request.query
             )
+            same_query = parsed_original.query == parsed_request.query
+            suffix_with_compatible_query = suffix_alias and (
+                same_query or not parsed_original.query or not parsed_request.query
+            )
 
-            if same_plain_path or same_rsc_route or same_next_image_route:
+            if same_plain_path or same_rsc_route or same_next_image_route or suffix_with_compatible_query:
                 return _to_browser_path(local_path)
+
+            if (
+                request_basename
+                and request_basename == Path(parsed_original.path).name
+                and (same_query or not parsed_request.query)
+            ):
+                browser_path = _to_browser_path(local_path)
+                if browser_path:
+                    basename_matches.append(browser_path)
+
+        basename_matches = list(dict.fromkeys(basename_matches))
+        if len(basename_matches) == 1:
+            return basename_matches[0]
 
         return None
 
@@ -305,7 +334,10 @@ class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     f for f in os.listdir(directory)
                     if os.path.isfile(os.path.join(directory, f))
                     and os.path.splitext(f)[1] == ext
-                    and os.path.splitext(f)[0].startswith(stem + '_')
+                    and (
+                        os.path.splitext(f)[0].startswith(stem + '_')
+                        or os.path.splitext(f)[0].rstrip('_') == stem.rstrip('_')
+                    )
                 ]
                 if len(candidates) == 1:
                     resolved_request_path = os.path.join(os.path.dirname(resolved_request_path), candidates[0])

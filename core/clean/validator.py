@@ -13,7 +13,8 @@ except ImportError:
     _BS4_AVAILABLE = False
 
 _EXTERNAL_PREFIXES = (
-    'http://', 'https://', 'data:', 'blob:', '//', '#', 'mailto:', 'tel:',
+    'http://', 'https://', 'data:', 'blob:', '//', '#', '%23',
+    'mailto:', 'tel:',
 )
 
 

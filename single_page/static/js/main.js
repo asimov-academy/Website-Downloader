@@ -2,6 +2,8 @@
 let currentSessionId = null;
 let eventSource = null;
 let allLogs = [];
+let downloadCompleted = false;
+let streamInterrupted = false;
 
 function startDownload() {
     const url = document.getElementById('urlInput').value.trim();
@@ -48,6 +50,13 @@ function startDownload() {
 }
 
 function connectSSE(sessionId) {
+    downloadCompleted = false;
+    streamInterrupted = false;
+
+    if (eventSource) {
+        eventSource.close();
+    }
+
     eventSource = new EventSource('/stream/' + sessionId);
 
     eventSource.onmessage = function(event) {
@@ -55,26 +64,86 @@ function connectSSE(sessionId) {
     };
 
     eventSource.addEventListener('done', function(event) {
-        eventSource.close();
-
         if (event.data === 'complete') {
-            // Trigger download
-            triggerDownload(sessionId);
-            showSuccess(sessionId);
-            setLoading(false);
+            handleDownloadComplete(sessionId);
         } else {
-            showError('Download falhou. Verifique os logs para mais detalhes.');
-            addLog('Download falhou');
-            setLoading(false);
+            handleDownloadError('Download falhou. Verifique os logs para mais detalhes.');
         }
     });
 
     eventSource.onerror = function() {
-        eventSource.close();
-        showError('Conexão com o servidor foi perdida.');
-        addLog('Erro de conexão SSE');
-        setLoading(false);
+        if (downloadCompleted) {
+            return;
+        }
+
+        if (!streamInterrupted) {
+            streamInterrupted = true;
+            addLog('Conexão SSE interrompida; aguardando reconexão automática...');
+        }
+
+        fetch('/status/' + sessionId)
+            .then(async response => {
+                if (response.status === 401) {
+                    eventSource.close();
+                    window.location.href = '/login';
+                    return null;
+                }
+
+                if (response.status === 404) {
+                    return { status: 'not_found' };
+                }
+
+                if (!response.ok) {
+                    return null;
+                }
+
+                return response.json();
+            })
+            .then(data => {
+                if (!data || downloadCompleted) {
+                    return;
+                }
+
+                if (data.status === 'complete') {
+                    handleDownloadComplete(sessionId);
+                } else if (data.status === 'error' || data.status === 'not_found') {
+                    handleDownloadError('Download falhou. Verifique os logs para mais detalhes.');
+                }
+            })
+            .catch(() => {
+                // EventSource retries automatically while the job is still running.
+            });
     };
+}
+
+function handleDownloadComplete(sessionId) {
+    if (downloadCompleted) {
+        return;
+    }
+
+    downloadCompleted = true;
+    if (eventSource) {
+        eventSource.close();
+    }
+
+    triggerDownload(sessionId);
+    showSuccess(sessionId);
+    setLoading(false);
+}
+
+function handleDownloadError(message) {
+    if (downloadCompleted) {
+        return;
+    }
+
+    downloadCompleted = true;
+    if (eventSource) {
+        eventSource.close();
+    }
+
+    showError(message);
+    addLog('Download falhou');
+    setLoading(false);
 }
 
 function triggerDownload(sessionId) {

@@ -3,7 +3,7 @@ Path corrector - update HTML/CSS/JS references after asset reorganization.
 """
 import json
 import re
-from urllib.parse import quote, unquote
+from urllib.parse import parse_qsl, quote, unquote
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -48,23 +48,24 @@ def _normalize_browser_path(path: str) -> str:
     return '/' + path.lstrip('/')
 
 
-def _load_resource_map(clean_dir: Path, log=None) -> tuple[dict, dict]:
+def _load_resource_map(clean_dir: Path, log=None) -> tuple[dict, dict, dict]:
     _log = log or (lambda msg: None)
     resource_map_path = clean_dir / 'assets' / 'resource-map.json'
     if not resource_map_path.exists():
-        return {}, {}
+        return {}, {}, {}
 
     try:
         data = json.loads(resource_map_path.read_text(encoding='utf-8', errors='ignore'))
     except Exception as exc:
         _log(f'   Aviso: falha ao ler resource-map.json para rewrite final: {exc}')
-        return {}, {}
+        return {}, {}, {}
 
     if not isinstance(data, dict):
-        return {}, {}
+        return {}, {}, {}
 
     remote_exact = {}
     local_alias_exact = {}
+    local_alias_signatures = {}
     for original_url, local_path in data.items():
         if not isinstance(original_url, str) or not isinstance(local_path, str):
             continue
@@ -91,8 +92,29 @@ def _load_resource_map(clean_dir: Path, log=None) -> tuple[dict, dict]:
             local_candidates.append(candidate)
             if not candidate.startswith('assets/'):
                 local_candidates.append(f'assets/{candidate}')
+
+            parts = candidate.split('/')
+            if len(parts) > 1:
+                without_first_segment = '/'.join(parts[1:])
+                if without_first_segment:
+                    local_candidates.append(without_first_segment)
+                    local_candidates.append(f'assets/{without_first_segment}')
+            if len(parts) > 2:
+                last_two_segments = '/'.join(parts[-2:])
+                if last_two_segments:
+                    local_candidates.append(last_two_segments)
+                    local_candidates.append(f'assets/{last_two_segments}')
+            if parts[-1:]:
+                local_candidates.append(parts[-1])
+        local_basename = Path(normalized_local).name
+        if local_basename:
+            local_candidates.append(local_basename)
         for candidate in local_candidates:
             local_alias_exact.setdefault(candidate.lstrip('/'), normalized_local)
+
+        stem_signature = _resource_signature_from_remote(parsed)
+        if stem_signature:
+            local_alias_signatures.setdefault(stem_signature, normalized_local)
 
         protocol_relative = urlunsplit(('', parsed.netloc, parsed.path, parsed.query, parsed.fragment))
         if protocol_relative:
@@ -109,7 +131,58 @@ def _load_resource_map(clean_dir: Path, log=None) -> tuple[dict, dict]:
                 browser_path,
             )
 
-    return remote_exact, local_alias_exact
+    return remote_exact, local_alias_exact, local_alias_signatures
+
+
+def _normalize_query_signature(query: str) -> tuple:
+    if not query:
+        return ()
+    try:
+        return tuple(sorted(parse_qsl(query, keep_blank_values=True)))
+    except ValueError:
+        return tuple(sorted(part for part in query.split('&') if part))
+
+
+def _normalize_media_suffix(suffix: str) -> str:
+    suffix = (suffix or '').lower()
+    if suffix in {'.jpg', '.jpeg'}:
+        return '.jpg'
+    return suffix
+
+
+def _resource_signature_from_remote(parsed) -> tuple | None:
+    name = Path(unquote(parsed.path)).name
+    if not name:
+        return None
+    suffix = _normalize_media_suffix(Path(name).suffix)
+    if not suffix:
+        return None
+    stem = Path(name).stem
+    if not stem:
+        return None
+    return (stem, suffix, _normalize_query_signature(parsed.query))
+
+
+def _resource_signature_from_local_alias(norm: str, query: str) -> tuple | None:
+    name = Path(unquote(norm)).name
+    if not name:
+        return None
+
+    suffix = _normalize_media_suffix(Path(name).suffix)
+    if not suffix:
+        return None
+
+    stem = Path(name).stem
+    if '_' in stem:
+        base_stem, hash_tail = stem.rsplit('_', 1)
+        if re.fullmatch(r'[0-9a-fA-F]{8,}', hash_tail):
+            stem = base_stem
+
+    if not stem:
+        return None
+
+    query = query[1:] if query.startswith('?') else query
+    return (stem, suffix, _normalize_query_signature(query))
 
 
 def _candidate_remote_refs(ref: str) -> list[str]:
@@ -155,7 +228,13 @@ def _lookup_remote(ref: str, remote_exact: dict) -> str | None:
     return None
 
 
-def _remap(ref: str, exact: dict, by_basename: dict, remote_exact: dict | None = None) -> str:
+def _remap(
+    ref: str,
+    exact: dict,
+    by_basename: dict,
+    remote_exact: dict | None = None,
+    local_alias_signatures: dict | None = None,
+) -> str:
     """Translate a single path reference. Returns original if no match found."""
     if not ref:
         return ref
@@ -172,6 +251,9 @@ def _remap(ref: str, exact: dict, by_basename: dict, remote_exact: dict | None =
     if '#' in base:
         base, frag_part = base.split('#', 1)
         frag_part = '#' + frag_part
+
+    if base.endswith('/'):
+        return ref
 
     remote_match = _lookup_remote(ref, remote_exact or {})
     if remote_match:
@@ -203,6 +285,22 @@ def _remap(ref: str, exact: dict, by_basename: dict, remote_exact: dict | None =
     if asset_decoded_norm in exact:
         new = exact[asset_decoded_norm]
         return '/' + new + query_part + frag_part
+    if norm.startswith('assets/'):
+        deasset_norm = norm[len('assets/'):]
+        if deasset_norm in exact:
+            new = exact[deasset_norm]
+            return '/' + new + query_part + frag_part
+    if decoded_norm.startswith('assets/'):
+        deasset_decoded_norm = decoded_norm[len('assets/'):]
+        if deasset_decoded_norm in exact:
+            new = exact[deasset_decoded_norm]
+            return '/' + new + query_part + frag_part
+
+    signature = _resource_signature_from_local_alias(norm, query_part)
+    if signature and local_alias_signatures:
+        new = local_alias_signatures.get(signature)
+        if new:
+            return '/' + new.lstrip('/') + query_part + frag_part
 
     # 2. Basename fallback (only if unambiguous)
     # Always use root-relative here: the file may have been relocated to a different
@@ -238,6 +336,7 @@ def _rewrite_quoted_local_literals(
     exact: dict,
     by_basename: dict,
     remote_exact: dict | None = None,
+    local_alias_signatures: dict | None = None,
     rewrite_remote: bool = False,
 ) -> str:
     """Remap quoted local-ish literals inside JS/JSON while preserving slash style."""
@@ -259,7 +358,13 @@ def _rewrite_quoted_local_literals(
         ):
             return match.group(0)
 
-        remapped = _remap(value, exact, by_basename, remote_exact)
+        remapped = _remap(
+            value,
+            exact,
+            by_basename,
+            remote_exact,
+            local_alias_signatures,
+        )
         if remapped == value:
             return match.group(0)
 
@@ -281,18 +386,24 @@ def _rewrite_quoted_local_literals(
 # CSS content fixer (url() and @import)
 # ---------------------------------------------------------------------------
 
-def _fix_css(css: str, exact: dict, by_basename: dict, remote_exact: dict | None = None) -> str:
+def _fix_css(
+    css: str,
+    exact: dict,
+    by_basename: dict,
+    remote_exact: dict | None = None,
+    local_alias_signatures: dict | None = None,
+) -> str:
     def replace_url(m):
         q = m.group(1) or ''
         path = m.group(2)
-        return f'url({q}{_remap(path, exact, by_basename, remote_exact)}{q})'
+        return f'url({q}{_remap(path, exact, by_basename, remote_exact, local_alias_signatures)}{q})'
 
     result = re.sub(r'url\((["\']?)([^)"\']+)\1\)', replace_url, css)
 
     def replace_import(m):
         q = m.group(1)
         path = m.group(2)
-        return f'@import {q}{_remap(path, exact, by_basename, remote_exact)}{q}'
+        return f'@import {q}{_remap(path, exact, by_basename, remote_exact, local_alias_signatures)}{q}'
 
     return re.sub(r'@import\s+(["\'])([^"\']+)\1', replace_import, result)
 
@@ -316,7 +427,13 @@ _HTML_SINGLE_ATTRS: dict = {
 _HTML_SRCSET_TAGS = {'img', 'source'}
 
 
-def _fix_srcset(srcset: str, exact: dict, by_basename: dict, remote_exact: dict | None = None) -> str:
+def _fix_srcset(
+    srcset: str,
+    exact: dict,
+    by_basename: dict,
+    remote_exact: dict | None = None,
+    local_alias_signatures: dict | None = None,
+) -> str:
     descriptor_pattern = re.compile(r'^\d+(?:\.\d+)?[wx]$')
     parts = srcset.split(',')
     fixed = []
@@ -333,7 +450,13 @@ def _fix_srcset(srcset: str, exact: dict, by_basename: dict, remote_exact: dict 
                 url_part = possible_url
                 descriptor = possible_descriptor
 
-        remapped = _encode_browser_url(_remap(url_part, exact, by_basename, remote_exact))
+        remapped = _encode_browser_url(_remap(
+            url_part,
+            exact,
+            by_basename,
+            remote_exact,
+            local_alias_signatures,
+        ))
         fixed.append(f'{remapped} {descriptor}'.strip())
     return ', '.join(fixed)
 
@@ -343,8 +466,15 @@ def _remap_importmap_value(
     exact: dict,
     by_basename: dict,
     remote_exact: dict | None = None,
+    local_alias_signatures: dict | None = None,
 ) -> str:
-    remapped = _remap(value, exact, by_basename, remote_exact)
+    remapped = _remap(
+        value,
+        exact,
+        by_basename,
+        remote_exact,
+        local_alias_signatures,
+    )
     if remapped == value:
         return value
 
@@ -362,6 +492,7 @@ def _rewrite_importmap_script(
     exact: dict,
     by_basename: dict,
     remote_exact: dict | None = None,
+    local_alias_signatures: dict | None = None,
 ) -> str:
     try:
         data = json.loads(script_text)
@@ -378,7 +509,13 @@ def _rewrite_importmap_script(
         for specifier, target in list(imports.items()):
             if not isinstance(target, str):
                 continue
-            remapped = _remap_importmap_value(target, exact, by_basename, remote_exact)
+            remapped = _remap_importmap_value(
+                target,
+                exact,
+                by_basename,
+                remote_exact,
+                local_alias_signatures,
+            )
             if remapped != target:
                 imports[specifier] = remapped
                 changed = True
@@ -389,7 +526,13 @@ def _rewrite_importmap_script(
         for scope_key, scope_imports in scopes.items():
             new_scope_key = scope_key
             if isinstance(scope_key, str) and not scope_key.startswith(('http://', 'https://', '//')):
-                new_scope_key = _remap_importmap_value(scope_key, exact, by_basename, remote_exact)
+                new_scope_key = _remap_importmap_value(
+                    scope_key,
+                    exact,
+                    by_basename,
+                    remote_exact,
+                    local_alias_signatures,
+                )
                 if new_scope_key != scope_key:
                     changed = True
 
@@ -399,7 +542,13 @@ def _rewrite_importmap_script(
                 for specifier, target in list(new_scope_imports.items()):
                     if not isinstance(target, str):
                         continue
-                    remapped = _remap_importmap_value(target, exact, by_basename, remote_exact)
+                    remapped = _remap_importmap_value(
+                        target,
+                        exact,
+                        by_basename,
+                        remote_exact,
+                        local_alias_signatures,
+                    )
                     if remapped != target:
                         new_scope_imports[specifier] = remapped
                         changed = True
@@ -415,7 +564,13 @@ def _rewrite_importmap_script(
     return json.dumps(data, ensure_ascii=False, separators=(', ', ': '))
 
 
-def _correct_html(filepath: Path, exact: dict, by_basename: dict, remote_exact: dict) -> bool:
+def _correct_html(
+    filepath: Path,
+    exact: dict,
+    by_basename: dict,
+    remote_exact: dict,
+    local_alias_signatures: dict,
+) -> bool:
     try:
         content = filepath.read_text(encoding='utf-8', errors='ignore')
     except Exception:
@@ -445,7 +600,13 @@ def _correct_html(filepath: Path, exact: dict, by_basename: dict, remote_exact: 
                 val = el.get(attr)
                 if not val or not isinstance(val, str):
                     continue
-                new_val = _remap(val, exact, by_basename, remote_exact)
+                new_val = _remap(
+                    val,
+                    exact,
+                    by_basename,
+                    remote_exact,
+                    local_alias_signatures,
+                )
                 if new_val != val:
                     el[attr] = new_val
                     changed = True
@@ -454,7 +615,13 @@ def _correct_html(filepath: Path, exact: dict, by_basename: dict, remote_exact: 
         for el in soup.find_all(tag_name):
             val = el.get('srcset')
             if val and isinstance(val, str):
-                new_val = _fix_srcset(val, exact, by_basename, remote_exact)
+                new_val = _fix_srcset(
+                    val,
+                    exact,
+                    by_basename,
+                    remote_exact,
+                    local_alias_signatures,
+                )
                 if new_val != val:
                     el['srcset'] = new_val
                     changed = True
@@ -463,7 +630,13 @@ def _correct_html(filepath: Path, exact: dict, by_basename: dict, remote_exact: 
         val = meta.get('content')
         if not val or not isinstance(val, str) or not val.startswith(('http://', 'https://', '//', '/')):
             continue
-        new_val = _remap(val, exact, by_basename, remote_exact)
+        new_val = _remap(
+            val,
+            exact,
+            by_basename,
+            remote_exact,
+            local_alias_signatures,
+        )
         if new_val != val:
             meta['content'] = new_val
             changed = True
@@ -472,7 +645,13 @@ def _correct_html(filepath: Path, exact: dict, by_basename: dict, remote_exact: 
     for el in soup.find_all(True):
         style = el.get('style')
         if style and isinstance(style, str):
-            new_style = _fix_css(style, exact, by_basename, remote_exact)
+            new_style = _fix_css(
+                style,
+                exact,
+                by_basename,
+                remote_exact,
+                local_alias_signatures,
+            )
             if new_style != style:
                 el['style'] = new_style
                 changed = True
@@ -480,7 +659,13 @@ def _correct_html(filepath: Path, exact: dict, by_basename: dict, remote_exact: 
     # <style> blocks
     for style_tag in soup.find_all('style'):
         if style_tag.string:
-            new_css = _fix_css(style_tag.string, exact, by_basename, remote_exact)
+            new_css = _fix_css(
+                style_tag.string,
+                exact,
+                by_basename,
+                remote_exact,
+                local_alias_signatures,
+            )
             if new_css != style_tag.string:
                 style_tag.string.replace_with(new_css)
                 changed = True
@@ -499,6 +684,7 @@ def _correct_html(filepath: Path, exact: dict, by_basename: dict, remote_exact: 
                 exact,
                 by_basename,
                 remote_exact,
+                local_alias_signatures,
             )
             if new_script_text != script_text:
                 script_tag.clear()
@@ -512,6 +698,7 @@ def _correct_html(filepath: Path, exact: dict, by_basename: dict, remote_exact: 
             exact,
             by_basename,
             remote_exact,
+            local_alias_signatures,
             rewrite_remote=False,
         )
         if new_script_text != script_text:
@@ -530,6 +717,7 @@ def _correct_html(filepath: Path, exact: dict, by_basename: dict, remote_exact: 
         exact,
         by_basename,
         remote_exact,
+        local_alias_signatures,
         rewrite_remote=False,
     )
 
@@ -544,12 +732,24 @@ def _serialize_html_stable(soup: BeautifulSoup) -> str:
     return _BLOCK_INTERTAG_WHITESPACE_PATTERN.sub(r'\1\2', html)
 
 
-def _correct_css(filepath: Path, exact: dict, by_basename: dict, remote_exact: dict) -> bool:
+def _correct_css(
+    filepath: Path,
+    exact: dict,
+    by_basename: dict,
+    remote_exact: dict,
+    local_alias_signatures: dict,
+) -> bool:
     try:
         content = filepath.read_text(encoding='utf-8', errors='ignore')
     except Exception:
         return False
-    new_content = _fix_css(content, exact, by_basename, remote_exact)
+    new_content = _fix_css(
+        content,
+        exact,
+        by_basename,
+        remote_exact,
+        local_alias_signatures,
+    )
     if remote_exact:
         for original_url, local_path in remote_exact.items():
             if original_url in new_content:
@@ -560,7 +760,13 @@ def _correct_css(filepath: Path, exact: dict, by_basename: dict, remote_exact: d
     return False
 
 
-def _correct_js(filepath: Path, exact: dict, by_basename: dict, remote_exact: dict) -> bool:
+def _correct_js(
+    filepath: Path,
+    exact: dict,
+    by_basename: dict,
+    remote_exact: dict,
+    local_alias_signatures: dict,
+) -> bool:
     """Replace whole-string path literals in JS (conservative: exact match only)."""
     try:
         content = filepath.read_text(encoding='utf-8', errors='ignore')
@@ -572,6 +778,7 @@ def _correct_js(filepath: Path, exact: dict, by_basename: dict, remote_exact: di
         exact,
         by_basename,
         remote_exact,
+        local_alias_signatures,
         rewrite_remote=True,
     )
 
@@ -586,6 +793,7 @@ def _correct_json(
     exact: dict,
     by_basename: dict,
     remote_exact: dict,
+    local_alias_signatures: dict,
     rewrite_remote: bool = True,
 ) -> bool:
     """Rewrite local-ish literals inside JSON/webmanifest text files."""
@@ -602,6 +810,7 @@ def _correct_json(
             exact,
             by_basename,
             remote_exact,
+            local_alias_signatures,
             rewrite_remote=rewrite_remote,
         )
     else:
@@ -610,6 +819,7 @@ def _correct_json(
             exact,
             by_basename,
             remote_exact,
+            local_alias_signatures,
             rewrite_remote=rewrite_remote,
         )
         result = json.dumps(rewritten_payload, ensure_ascii=False, separators=(', ', ': '))
@@ -625,16 +835,31 @@ def _rewrite_json_values(
     exact: dict,
     by_basename: dict,
     remote_exact: dict,
+    local_alias_signatures: dict,
     rewrite_remote: bool = True,
 ):
     if isinstance(payload, dict):
         return {
-            key: _rewrite_json_values(value, exact, by_basename, remote_exact, rewrite_remote)
+            key: _rewrite_json_values(
+                value,
+                exact,
+                by_basename,
+                remote_exact,
+                local_alias_signatures,
+                rewrite_remote,
+            )
             for key, value in payload.items()
         }
     if isinstance(payload, list):
         return [
-            _rewrite_json_values(item, exact, by_basename, remote_exact, rewrite_remote)
+            _rewrite_json_values(
+                item,
+                exact,
+                by_basename,
+                remote_exact,
+                local_alias_signatures,
+                rewrite_remote,
+            )
             for item in payload
         ]
     if not isinstance(payload, str):
@@ -643,7 +868,7 @@ def _rewrite_json_values(
     is_remote = payload.startswith(('http://', 'https://', '//'))
     if is_remote and not rewrite_remote:
         return payload
-    return _remap(payload, exact, by_basename, remote_exact)
+    return _remap(payload, exact, by_basename, remote_exact, local_alias_signatures)
 
 
 # ---------------------------------------------------------------------------
@@ -658,12 +883,12 @@ def correct_all_paths(clean_dir: Path, path_mapping: dict, log_callback=None) ->
     log = log_callback or (lambda msg: None)
     clean_dir = Path(clean_dir)
 
-    if not path_mapping:
+    exact, by_basename = _build_lookup(path_mapping)
+    remote_exact, local_alias_exact, local_alias_signatures = _load_resource_map(clean_dir, log)
+    if not path_mapping and not remote_exact and not local_alias_exact and not local_alias_signatures:
         log('   Sem mapeamento de paths para corrigir')
         return {'html': 0, 'css': 0, 'js': 0, 'json': 0}
 
-    exact, by_basename = _build_lookup(path_mapping)
-    remote_exact, local_alias_exact = _load_resource_map(clean_dir, log)
     if local_alias_exact:
         for old_ref, new_ref in local_alias_exact.items():
             exact.setdefault(old_ref, new_ref)
@@ -687,13 +912,13 @@ def correct_all_paths(clean_dir: Path, path_mapping: dict, log_callback=None) ->
 
         ext = path.suffix.lower()
         if ext in ('.html', '.htm'):
-            if _correct_html(path, exact, by_basename, remote_exact):
+            if _correct_html(path, exact, by_basename, remote_exact, local_alias_signatures):
                 stats['html'] += 1
         elif ext == '.css':
-            if _correct_css(path, exact, by_basename, remote_exact):
+            if _correct_css(path, exact, by_basename, remote_exact, local_alias_signatures):
                 stats['css'] += 1
         elif ext in ('.js', '.mjs', '.cjs'):
-            if _correct_js(path, exact, by_basename, remote_exact):
+            if _correct_js(path, exact, by_basename, remote_exact, local_alias_signatures):
                 stats['js'] += 1
         elif ext in ('.json', '.webmanifest'):
             if _correct_json(
@@ -701,6 +926,7 @@ def correct_all_paths(clean_dir: Path, path_mapping: dict, log_callback=None) ->
                 exact,
                 by_basename,
                 remote_exact,
+                local_alias_signatures,
                 rewrite_remote=path.name != 'resource-map.json',
             ):
                 stats['json'] += 1

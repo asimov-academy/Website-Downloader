@@ -34,6 +34,13 @@ _RUNTIME_ALIAS_EXTENSIONS = frozenset({
     '.js', '.mjs', '.cjs', '.json', '.webmanifest', '.wasm',
     '.woff', '.woff2', '.ttf', '.otf', '.eot',
 })
+_CSS_IMAGE_URL_EXTENSIONS = frozenset({
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico',
+})
+_CSS_FONT_URL_EXTENSIONS = frozenset({
+    '.woff2', '.woff', '.ttf', '.otf', '.eot',
+})
+_CSS_URL_RE = re.compile(r'url\(\s*([\'"]?)([^)\'"]+)\1\s*\)', re.IGNORECASE)
 
 
 def prune_unreferenced_data_assets(clean_dir: Path, log=None) -> dict:
@@ -106,7 +113,7 @@ def materialize_runtime_aliases(clean_dir: Path, path_mapping: dict, log=None) -
     """
     _log = log or (lambda m: None)
     created = 0
-    text_cache = _build_text_reference_cache(clean_dir)
+    reference_index = _build_text_reference_index(clean_dir)
 
     for old_rel, new_rel in sorted((path_mapping or {}).items()):
         old_path = clean_dir / old_rel
@@ -117,7 +124,7 @@ def materialize_runtime_aliases(clean_dir: Path, path_mapping: dict, log=None) -
             continue
         if new_path.suffix.lower() not in _RUNTIME_ALIAS_EXTENSIONS:
             continue
-        if not _should_materialize_alias(old_rel, text_cache):
+        if not _should_materialize_alias(old_rel, reference_index):
             continue
 
         old_path.parent.mkdir(parents=True, exist_ok=True)
@@ -127,6 +134,26 @@ def materialize_runtime_aliases(clean_dir: Path, path_mapping: dict, log=None) -
     if created:
         _log(f'   Finalizer: {created} alias(es) de compatibilidade materializados')
     return {'created': created}
+
+
+def _build_text_reference_index(clean_dir: Path) -> set[str]:
+    references: set[str] = set()
+    for text in _build_text_reference_cache(clean_dir):
+        for match in re.finditer(r'(["\'`])([^"\'`]+)\1', text):
+            _add_reference_token(references, match.group(2))
+        for match in _CSS_URL_RE.finditer(text):
+            _add_reference_token(references, match.group(2))
+    return references
+
+
+def _add_reference_token(references: set[str], value: str) -> None:
+    value = (value or '').strip()
+    if not value or value.startswith(_EXTERNAL_PREFIXES):
+        return
+    for candidate in {value, value.split('?', 1)[0].split('#', 1)[0]}:
+        candidate = candidate.strip().lstrip('/')
+        if candidate:
+            references.add(candidate)
 
 
 def _build_text_reference_cache(clean_dir: Path) -> list[str]:
@@ -153,25 +180,11 @@ def _build_text_reference_cache(clean_dir: Path) -> list[str]:
     return cache
 
 
-def _should_materialize_alias(old_rel: str, text_cache: list[str]) -> bool:
+def _should_materialize_alias(old_rel: str, reference_index: set[str]) -> bool:
     old_rel = old_rel.strip().lstrip('/')
     if not old_rel:
         return False
-    tokens = {
-        f'"{old_rel}"',
-        f"'{old_rel}'",
-        f'`{old_rel}`',
-        f'"/{old_rel}"',
-        f"'/{old_rel}'",
-        f'`/{old_rel}`',
-        f'url({old_rel})',
-        f'url(/{old_rel})',
-        f'url("{old_rel}")',
-        f"url('{old_rel}')",
-        f'url("/{old_rel}")',
-        f"url('/{old_rel}')",
-    }
-    return any(token in text for text in text_cache for token in tokens)
+    return old_rel in reference_index
 
 
 def _should_skip_alias_reference_cache(path: Path, text: str) -> bool:
@@ -266,6 +279,57 @@ def prune_missing_local_html_refs(clean_dir: Path, log=None) -> dict:
     if removed_refs:
         _log(f'   Finalizer: {removed_refs} referência(s) locais quebradas removidas do HTML')
     return {'updated_files': updated_files, 'removed_refs': removed_refs}
+
+
+def prune_missing_local_css_urls(clean_dir: Path, log=None) -> dict:
+    """
+    Neutralize local CSS image url() references when the target was never saved.
+
+    These usually come from optional plugin sprites/backgrounds that were 404 at
+    capture time. Keeping them in clean/ creates offline console noise and keeps
+    validation red without improving fidelity.
+    """
+    _log = log or (lambda m: None)
+    updated_files = 0
+    removed_urls = 0
+
+    for css_file in sorted(clean_dir.rglob('*.css')):
+        try:
+            content = css_file.read_text(encoding='utf-8', errors='ignore')
+        except Exception:
+            continue
+
+        changed = False
+
+        def repl(match):
+            nonlocal changed, removed_urls
+            ref = (match.group(2) or '').strip()
+            target = _resolve_local_ref(ref, css_file, clean_dir)
+            if target is None or target.exists():
+                return match.group(0)
+
+            suffix = target.suffix.lower()
+            if suffix in _CSS_IMAGE_URL_EXTENSIONS:
+                changed = True
+                removed_urls += 1
+                return 'none'
+            if suffix in _CSS_FONT_URL_EXTENSIONS:
+                changed = True
+                removed_urls += 1
+                return 'local("")'
+
+            return match.group(0)
+
+        cleaned = _CSS_URL_RE.sub(repl, content)
+        if not changed:
+            continue
+
+        css_file.write_text(cleaned, encoding='utf-8')
+        updated_files += 1
+
+    if removed_urls:
+        _log(f'   Finalizer: {removed_urls} url(s) CSS locais quebradas neutralizadas')
+    return {'updated_files': updated_files, 'removed_urls': removed_urls}
 
 
 def _serialize_html_stable(soup: BeautifulSoup) -> str:

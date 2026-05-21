@@ -13,6 +13,11 @@ Registro de sites usados para validar o DeepMirror WebSites.
 - [revolut.com](https://www.revolut.com/pt-BR/)
 - [palmer-dinnerware.com](https://www.palmer-dinnerware.com/)
 - [activetheory.net](https://activetheory.net/)
+- [riopetgavea.com.br](https://riopetgavea.com.br/)
+- [ecoland.framer.website](https://ecoland.framer.website/)
+- [dash.dropbox.com/mclarenf1](https://dash.dropbox.com/mclarenf1)
+- [liquidink.design/github_web](https://www.liquidink.design/github_web/)
+- [tabkitchenbakery.com](https://tabkitchenbakery.com/)
 
 ## ⚠️ Com Bugs Conhecidos
 

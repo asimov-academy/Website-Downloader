@@ -121,7 +121,7 @@ class SiteCleaner:
                 shutil.copy2(item, target)
 
     def _has_streaming_next_runtime(self, root: Path) -> bool:
-        """Detect Next.js/app-router artifacts that are sensitive to JS rebundling."""
+        """Detect framework runtimes that are sensitive to JS/CSS rebundling."""
         try:
             for html_file in root.rglob('*.html'):
                 try:
@@ -131,9 +131,29 @@ class SiteCleaner:
 
                 if not any(
                     marker in content
-                    for marker in ('__NEXT_DATA__', 'self.__next_f.push', '/_next/static/')
+                    for marker in (
+                        '__NEXT_DATA__',
+                        'self.__next_f.push',
+                        '/_next/static/',
+                        'framerusercontent.com/sites/',
+                        'data-framer-name=',
+                        'data-framer-component-type=',
+                        'ElementorProFrontendConfig',
+                        'elementorFrontendConfig',
+                        '/wp-content/plugins/elementor',
+                    )
                 ):
                     continue
+
+                if (
+                    'framerusercontent.com/sites/' in content
+                    or 'data-framer-name=' in content
+                    or 'data-framer-component-type=' in content
+                    or 'ElementorProFrontendConfig' in content
+                    or 'elementorFrontendConfig' in content
+                    or '/wp-content/plugins/elementor' in content
+                ):
+                    return True
 
                 if not _BS4_AVAILABLE:
                     if '__NEXT_DATA__' in content:
@@ -191,7 +211,7 @@ class SiteCleaner:
             preserve_framework_runtime = self._has_streaming_next_runtime(clean_dir)
             if preserve_framework_runtime:
                 self.log(
-                    "   Site com runtime Next.js detectado: mantendo JS em modo conservador no clean/"
+                    "   Site com runtime de framework detectado: mantendo HTML/CSS/JS em modo conservador no clean/"
                 )
 
             # Inicializar sistema de auditoria
@@ -257,6 +277,9 @@ class SiteCleaner:
             self.log("   [Etapa 7] Corrigindo referências de paths...")
             from .path_corrector import correct_all_paths
             path_stats = correct_all_paths(clean_dir, path_mapping, self.log)
+            if path_stats.get('json'):
+                self.log("      Reaplicando correção com resource-map atualizado...")
+                correct_all_paths(clean_dir, {}, self.log)
             audit.snapshot('06_after_path_correction', clean_dir, 'Referências de paths atualizadas')
 
             # ---------------------------------------------------------------
@@ -296,12 +319,17 @@ class SiteCleaner:
             rebundle_mapping.update(js_plan.get('mapping', {}))
             if rebundle_mapping:
                 correct_all_paths(clean_dir, rebundle_mapping, self.log)
-            from .finalizer import materialize_runtime_aliases, prune_missing_local_html_refs
+            from .finalizer import (
+                materialize_runtime_aliases,
+                prune_missing_local_css_urls,
+                prune_missing_local_html_refs,
+            )
             compatibility_mapping = {}
             compatibility_mapping.update(path_mapping)
             compatibility_mapping.update(rebundle_mapping)
             materialize_runtime_aliases(clean_dir, compatibility_mapping, self.log)
             prune_missing_local_html_refs(clean_dir, self.log)
+            prune_missing_local_css_urls(clean_dir, self.log)
             audit.snapshot(
                 '08_after_bundle_reference_repair',
                 clean_dir,

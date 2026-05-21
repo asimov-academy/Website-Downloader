@@ -5,6 +5,30 @@ from bs4 import BeautifulSoup, NavigableString
 
 
 class PostProcessTransformersMixin:
+    def _dom_pair_too_large_for_original_matching(
+        self,
+        soup,
+        original_soup,
+        label,
+        max_elements=1000,
+    ):
+        """Avoid quadratic original/current matching on very large captured DOMs."""
+        current_body = soup.find('body') if soup else None
+        original_body = original_soup.find('body') if original_soup else None
+        if not current_body or not original_body:
+            return False
+
+        current_count = len(current_body.find_all(True))
+        original_count = len(original_body.find_all(True))
+        if max(current_count, original_count) <= max_elements:
+            return False
+
+        self.log(
+            f"   Pulando {label} em DOM grande "
+            f"({current_count}/{original_count} elementos)"
+        )
+        return True
+
     def _restore_empty_runtime_hosts(self, soup):
         """
         Reset server-empty runtime hosts back to their original empty state.
@@ -15,6 +39,10 @@ class PostProcessTransformersMixin:
         """
         original_soup = self._get_original_html_soup()
         if not original_soup:
+            return
+        if self._dom_pair_too_large_for_original_matching(
+            soup, original_soup, 'restauração de hosts vazios'
+        ):
             return
 
         path_lookup, signature_lookup = self._build_original_element_lookups(original_soup)
@@ -148,7 +176,7 @@ class PostProcessTransformersMixin:
 
         target_parent.append(clone)
 
-    def _restore_missing_original_support_nodes(self, soup):
+    def _restore_missing_original_support_nodes(self, soup, max_restores=80, max_candidates=400):
         """
         Restore original source nodes that page.content() may lose after client boot.
 
@@ -164,24 +192,44 @@ class PostProcessTransformersMixin:
         original_body = original_soup.find('body')
         if not current_body or not original_body:
             return
+        if self._dom_pair_too_large_for_original_matching(
+            soup, original_soup, 'restauração de nós-fonte'
+        ):
+            return
 
         _, original_signature_lookup = self._build_original_element_lookups(original_soup)
         restored = 0
         attempted_roots = set()
 
+        original_candidates = []
+        for original_elem in original_body.find_all(True):
+            signature = self._element_identity_signature(original_elem)
+            if not signature:
+                continue
+            if signature[0] == 'class' and len(original_signature_lookup.get(signature, [])) != 1:
+                continue
+            if not self._is_support_source_node(original_elem):
+                continue
+            original_candidates.append(original_elem)
+            if len(original_candidates) > max_candidates:
+                self.log(
+                    f"   Pulando restauração ampla de nós-fonte em DOM grande "
+                    f"({len(original_candidates)}+ candidatos)"
+                )
+                return
+
         while True:
+            if restored >= max_restores:
+                self.log(
+                    f"   Restauração de nós-fonte interrompida no limite de {max_restores} nós"
+                )
+                break
+
             current_path_lookup, current_signature_lookup = self._build_original_element_lookups(soup)
             changed = False
 
-            for original_elem in original_body.find_all(True):
-                signature = self._element_identity_signature(original_elem)
-                if not signature:
-                    continue
-                if signature[0] == 'class' and len(original_signature_lookup.get(signature, [])) != 1:
-                    continue
+            for original_elem in original_candidates:
                 if self._match_original_element(original_elem, current_path_lookup, current_signature_lookup):
-                    continue
-                if not self._is_support_source_node(original_elem):
                     continue
 
                 subtree_root, target_parent = self._find_restore_subtree_root(
@@ -264,6 +312,10 @@ class PostProcessTransformersMixin:
         """
         original_soup = self._get_original_html_soup()
         if not original_soup:
+            return
+        if self._dom_pair_too_large_for_original_matching(
+            soup, original_soup, 'restauração de contêineres esvaziados'
+        ):
             return
 
         path_lookup, signature_lookup = self._build_original_element_lookups(original_soup)
@@ -406,6 +458,10 @@ class PostProcessTransformersMixin:
         original_body = original_soup.find('body')
         current_body = soup.find('body')
         if not original_body or not current_body:
+            return
+        if self._dom_pair_too_large_for_original_matching(
+            soup, original_soup, 'restauração de controles de formulário'
+        ):
             return
 
         restored = 0
@@ -754,6 +810,10 @@ class PostProcessTransformersMixin:
         original_soup = self._get_original_html_soup()
         if not original_soup:
             return
+        if self._dom_pair_too_large_for_original_matching(
+            soup, original_soup, 'restauração de estilos inline originais'
+        ):
+            return
 
         path_lookup, signature_lookup = self._build_original_element_lookups(original_soup)
 
@@ -795,6 +855,10 @@ class PostProcessTransformersMixin:
         """
         original_soup = self._get_original_html_soup()
         if not original_soup:
+            return
+        if self._dom_pair_too_large_for_original_matching(
+            soup, original_soup, 'restauração de transforms SVG'
+        ):
             return
 
         original_lookup = {}

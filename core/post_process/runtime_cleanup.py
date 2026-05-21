@@ -428,6 +428,11 @@ class PostProcessRuntimeCleanupMixin:
         if not current_body or not original_body:
             return
 
+        current_count = len(current_body.find_all(True))
+        original_count = len(original_body.find_all(True))
+        if current_count <= int(original_count * 1.15):
+            return
+
         path_lookup, signature_lookup = self._build_original_element_lookups(original_soup)
         removed = 0
 
